@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds the frozen app: dist\HWiNFO Panel\HWiNFO Panel.exe (PyInstaller, one-folder, windowed).
 .DESCRIPTION
@@ -58,10 +58,10 @@ if (-not (Test-Path -LiteralPath $exe)) { throw "Build output missing: $exe" }
 Write-Host "Built       : $exe (version $version)"
 
 if ($Zip) {
-    $zip = Join-Path $root "dist\HWiNFO-Panel-$version-portable.zip"
-    if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
-    Compress-Archive -Path (Join-Path $root 'dist\HWiNFO Panel') -DestinationPath $zip
-    Write-Host "Portable zip: $zip"
+    $zipPath = Join-Path $root "dist\HWiNFO-Panel-$version-portable.zip"
+    if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+    Compress-Archive -Path (Join-Path $root 'dist\HWiNFO Panel') -DestinationPath $zipPath
+    Write-Host "Portable zip: $zipPath"
 }
 
 if ($Installer) {
