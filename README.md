@@ -20,11 +20,15 @@ Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
   number formats, units, colour limits, bars.
 - 256-step green to red colour gradient per row from its limits (reversed limits for FPS: low = red).
 - **CSV logging**: every on/off session writes a new file; "required rows" or "all sensors" (slide switch);
-  interval 0.5 to 30 s (spin box in the panel). Press `L` to toggle recording, `F11` for full screen.
+  interval 0.5 to 30 s (spin box in the panel). Press `L` to toggle recording, `S` for settings, `F11` for full screen.
 - Optional (after `install.ps1`): the panel **starts HWiNFO when it opens and stops it when it closes**, writes the
   logging interval to HWiNFO's `SensorInterval`, and restarts HWiNFO automatically when the shared memory is gone for
   more than 20 s (the free HWiNFO version stops its sensors after 12 hours). Without this the panel runs in read-only
   mode and shows a hint when HWiNFO is not running.
+- **Settings window** (gear button next to the interval box, or press `S`): language, columns, monitor, window mode,
+  always on top, row / font scale, logging, CSV format, HWiNFO options, and the layout itself (show / hide rows, names,
+  colour limits, bars, section titles / colours / order, "Add sensor" from the live HWiNFO list). Changes apply live.
+- **Multi-column layout** for wide screens: sections are distributed over 1 to 3 columns (automatic by window shape).
 - English and Turkish UI (follows the Windows display language by default).
 - Pure Python standard library; no packages to install.
 
@@ -85,6 +89,8 @@ Set the environment variable `HWINFO_PANEL_DIR` to use another folder (portable 
 | `language` | `"auto"`, `"tr"`, `"en"` | UI language (`auto` = Windows display language) |
 | `monitor` | `"auto"` or index | `auto` = first non-primary portrait monitor, otherwise the primary one. Indexes: `python tools/list_monitors.py` |
 | `window_mode` | `"maximized"`, `"fullscreen"`, `"window"` | how the window is placed on that monitor |
+| `columns` | `"auto"`, `1`, `2`, `3` | number of columns; `auto` = 1 on a portrait window, otherwise 3 if width / height is 2.0 or more, else 2. Whole sections are distributed in order, a section is never split |
+| `ui_scale` | 80 to 150 | row height / font scale in percent (rows never exceed the available height) |
 | `topmost` | `true` / `false` | keep the window on top |
 | `interval` | 0.5 to 30 | CSV logging interval in seconds |
 | `logging` | `true` / `false` | recording on/off (also toggled in the panel) |
@@ -105,7 +111,8 @@ detected layout into `config.json` (HWiNFO must be running):
 python tools/export_layout.py
 ```
 
-and change the `sections` list. If none of your rows exists on a PC, the panel falls back to auto-detection.
+and change the `sections` list, or use the layout tab of the settings window (it writes the same list; "Reset to
+auto layout" sets `"sections": "auto"` again). If none of your rows exists on a PC, the panel falls back to auto-detection.
 
 ```json
 "sections": [
@@ -129,6 +136,8 @@ and change the `sections` list. If none of your rows exists on a PC, the panel f
   optional. The first matching reading wins. `type` (optional): 1 temp, 2 voltage, 3 fan, 4 current, 5 power,
   6 clock, 7 usage, 8 other.
 * `format`: Python format for the number, e.g. `"{:.1f}"`. `unit`: text shown (default: HWiNFO's unit).
+* `visible` (row, optional, default `true`): `false` hides the row (not shown, not logged in "required" mode) but keeps
+  it in the file; the settings window sets it.
 * `limits`: `[green_value, red_value]`: the colour moves from green to red between them (a bigger green value than
   red value reverses it, as for FPS). Without `limits` the row has no bar / gradient. `bar`: `false` hides the bar.
 * To find the names on your PC: `python tools/list_sensors.py` (optionally with filter words:
@@ -157,7 +166,8 @@ It has no network code and sends nothing anywhere.
 ## Development
 
 `hwsm.py` (shared memory reader), `layout.py` (rows, matching, auto-detection), `config.py` (settings, monitors),
-`hwctl.py` (HWiNFO detection and tasks), `i18n.py` (strings), `panel.py` (UI), `winicon.py` (taskbar identity),
+`hwctl.py` (HWiNFO detection and tasks), `i18n.py` (strings), `panel.py` (UI), `settings_ui.py` (settings window),
+`winicon.py` (taskbar identity),
 `make_icon.py` (regenerates `panel.ico`). License: MIT.
 
 ---
@@ -184,6 +194,13 @@ listesini yazdırıp elle değiştirin. Sensör ve etiket kalıpları HWiNFO'nun
 (düzenli ifade) eşleşir; adları görmek için `python tools/list_sensors.py` kullanın (çıktıda seri numaraları
 olabilir, paylaşmayın).
 
-**Kısayollar:** `L` kaydı açar/kapatır, `F11` tam ekran. **CSV:** her kayıt oturumu ayrı dosyadır; ayırıcı ve ondalık
+**Ayarlar penceresi:** durum çubuğunda aralık kutusunun yanındaki dişli düğmesi veya `S` tuşu. Dil, sütun sayısı, monitör,
+pencere modu, her zaman üstte, satır / yazı ölçeği, kayıt ve CSV biçimi, HWiNFO seçenekleri ve düzenin kendisi
+(satırları gösterme / gizleme, adlar, renk sınırları, çubuklar, bölüm başlığı / rengi / sırası, canlı HWiNFO
+listesinden "Sensör ekle") buradan değiştirilir; değişiklikler anında uygulanır. **Sütunlar:** geniş ekranlarda bölümler
+1-3 sütuna dağıtılır (`columns`: `auto`, 1, 2, 3; `ui_scale`: 80-150). Gizlenen satırlar `"visible": false` olarak
+dosyada kalır.
+
+**Kısayollar:** `L` kaydı açar/kapatır, `S` ayarlar, `F11` tam ekran. **CSV:** her kayıt oturumu ayrı dosyadır; ayırıcı ve ondalık
 işareti varsayılan olarak Windows bölge ayarlarından alınır (Türkçe Excel için `;` ve `,`).
 **Gizlilik:** veriler bilgisayarınızdan çıkmaz; ağ erişimi yoktur.

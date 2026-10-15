@@ -10,11 +10,14 @@ APP_ID = "HWiNFOPanel.App"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 INTERVAL_MIN, INTERVAL_MAX = 0.5, 30.0
+SCALE_MIN, SCALE_MAX = 80, 150
 
 DEFAULTS = {
     "language": "auto",              # "auto" (Windows UI language) | "tr" | "en"
     "monitor": "auto",               # "auto" | monitor index (see tools/list_monitors.py)
     "window_mode": "maximized",      # "maximized" | "fullscreen" | "window"
+    "columns": "auto",               # "auto" | 1 | 2 | 3 (auto: 1 on portrait screens, else 2 or 3 by aspect ratio)
+    "ui_scale": 100,                 # row height / font scale in percent (80 - 150), never larger than fits
     "topmost": True,
     "interval": 5.0,                 # CSV logging interval, seconds (0.5 - 30)
     "logging": False,                # CSV logging on/off
@@ -29,10 +32,30 @@ DEFAULTS = {
 }
 
 
+def _package_family():
+    """Package family name when running as a packaged app (Microsoft Store Python), else None."""
+    try:
+        n = wintypes.UINT(0)
+        k = ctypes.windll.kernel32
+        if k.GetCurrentPackageFamilyName(ctypes.byref(n), None) != 122:     # ERROR_INSUFFICIENT_BUFFER
+            return None
+        buf = ctypes.create_unicode_buffer(n.value)
+        if k.GetCurrentPackageFamilyName(ctypes.byref(n), buf) == 0:
+            return buf.value
+    except Exception:
+        pass
+    return None
+
+
 def data_dir():
     d = os.environ.get("HWINFO_PANEL_DIR")
     if not d:
         base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        fam = _package_family()
+        if fam:
+            # Store Python: writes to %LOCALAPPDATA% are silently redirected into the package folder, where the
+            # scheduled tasks, Explorer and other programs can't see them. Use that real folder explicitly.
+            base = os.path.join(base, "Packages", fam, "LocalCache", "Local")
         d = os.path.join(base, APP_NAME)
     return d
 
@@ -84,6 +107,8 @@ def load_config():
         except OSError:
             pass
     cfg["interval"] = clamp_interval(cfg.get("interval"))
+    cfg["columns"] = norm_columns(cfg.get("columns"))
+    cfg["ui_scale"] = clamp_scale(cfg.get("ui_scale"))
     return cfg, note
 
 
@@ -95,8 +120,27 @@ def clamp_interval(v):
     return round(min(INTERVAL_MAX, max(INTERVAL_MIN, v)), 1)
 
 
+def norm_columns(v):
+    """'auto' | 1 | 2 | 3 (anything else -> 'auto')."""
+    try:
+        n = int(v)
+        if n in (1, 2, 3):
+            return n
+    except (TypeError, ValueError):
+        pass
+    return "auto"
+
+
+def clamp_scale(v):
+    try:
+        v = float(str(v).replace(",", "."))
+    except (TypeError, ValueError):
+        v = DEFAULTS["ui_scale"]
+    return int(round(min(SCALE_MAX, max(SCALE_MIN, v))))
+
+
 def save_keys(cfg, *keys):
-    """Update only the given keys in config.json (keeps the rest, e.g. hand-edited sections)."""
+    """Update only the given keys in config.json (keeps the rest, e.g. hand-edited sections). True on success."""
     path = config_path()
     try:
         with open(path, encoding="utf-8-sig") as f:
@@ -109,8 +153,9 @@ def save_keys(cfg, *keys):
         cur[k] = cfg[k]
     try:
         _write(path, cur)
+        return True
     except OSError:
-        pass
+        return False
 
 
 # ------------------------------------------------------------------ locale (CSV separators)

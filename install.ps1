@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Installs HWiNFO Panel for the current user.
 
@@ -28,6 +28,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+$dataDirGiven = [bool]$DataDir
 if (-not $DataDir) {
     $DataDir = if ($env:HWINFO_PANEL_DIR) { $env:HWINFO_PANEL_DIR } else { Join-Path $env:LOCALAPPDATA 'HWiNFO Panel' }
 }
@@ -136,6 +137,22 @@ if (-not $py) {
     Write-Error 'No usable pythonw found. Install Python 3.10+ (with tkinter) from python.org or the Microsoft Store, then run install.ps1 again.'
 }
 Write-Host "Python        : $($py.Exe) $($py.Pre -join ' ')"
+
+# Ask Python where the panel keeps its data: Microsoft Store Python redirects %LOCALAPPDATA% into its package
+# folder, and the scheduled task must point at that real folder.
+if (-not $dataDirGiven -and -not $env:HWINFO_PANEL_DIR) {
+    $pyc = Join-Path (Split-Path $py.Exe) ((Split-Path $py.Exe -Leaf) -replace '^pythonw', 'python' -replace '^pyw', 'py')
+    if (Test-Path -LiteralPath $pyc) {
+        $code = "import sys; sys.path.insert(0, r'$root'); import config; print(config.data_dir())"
+        $real = (& $pyc @($py.Pre) -c $code 2>$null | Select-Object -Last 1)
+        if ($real -and $real.Trim()) {
+            $DataDir = $real.Trim()
+            $log = Join-Path $DataDir 'install_tasks.log'
+            New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+        }
+    }
+}
+Write-Host "Data folder   : $DataDir"
 
 # Start Menu shortcut
 $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\HWiNFO Panel.lnk'

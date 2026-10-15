@@ -32,9 +32,10 @@ def format_decimals(fmt, unit):
 class Row:
     """One panel row. Build with Row.from_cfg(dict)."""
 
-    def __init__(self, name, sensor, label, rtype, fmt, unit, limits, bar):
+    def __init__(self, name, sensor, label, rtype, fmt, unit, limits, bar, visible=True):
         self.name, self.sensor, self.label, self.rtype = name, sensor, label, rtype
         self.fmt, self.unit, self.limits, self.bar = fmt, unit, limits, bar
+        self.visible = visible
         self.sre = re.compile(sensor, re.I) if sensor else None
         self.lre = re.compile(label, re.I)
         self.key = f"{name}|{sensor or ''}|{label}|{'' if rtype is None else rtype}"
@@ -56,8 +57,10 @@ class Row:
             limits = (float(lim[0]), float(lim[1]))
         bar = d.get("bar")
         bar = (limits is not None) if bar is None else bool(bar and limits is not None)
+        visible = d.get("visible", True)
+        visible = not (visible is False or visible in (0, "false", "False", "no"))
         return cls(name, d.get("sensor") or None, label, rtype, d.get("format") or None, d.get("unit") or "",
-                   limits, bar)
+                   limits, bar, visible)
 
     def match(self, rd):
         i = self._idx
@@ -92,8 +95,9 @@ class Section:
         self.title, self.color, self.icon, self.rows = title, color, icon, rows
 
 
-def build_sections(cfg_sections):
-    """Config list -> [Section]. Bad entries are skipped with a message on stderr."""
+def build_sections(cfg_sections, include_hidden=False):
+    """Config list -> [Section]. Bad entries are skipped with a message on stderr.
+    Rows with "visible": false are left out (they stay in the config) unless include_hidden is set."""
     out = []
     for si, s in enumerate(cfg_sections if isinstance(cfg_sections, list) else []):
         try:
@@ -101,7 +105,9 @@ def build_sections(cfg_sections):
             rows = []
             for rd_ in s.get("rows", []):
                 try:
-                    rows.append(Row.from_cfg(rd_))
+                    row = Row.from_cfg(rd_)
+                    if row.visible or include_hidden:
+                        rows.append(row)
                 except Exception as ex:
                     print(f"config: section {si}, row {rd_!r} ignored: {ex}", file=sys.stderr)
             if rows:
@@ -117,6 +123,93 @@ def all_rows(sections):
 
 def count_matches(sections, rd):
     return sum(1 for r in all_rows(sections) if r.match(rd))
+
+
+# ------------------------------------------------------------------ multi-column geometry (pure, no tkinter)
+HEAD, FOOT, STATUS = 1.75, 0.35, 3.0     # section header / footer / status bar, in row heights
+GAP_UNITS = 0.3                           # typical gap between cards in row heights (partition weight only)
+MIN_RH = 14.0
+RH_CAP = 0.08                             # row height never exceeds this share of the column width
+BAR_MIN_COL_W = 520                       # narrower columns drop the bar column
+
+
+def resolve_columns(setting, W, H):
+    """'auto' | 1 | 2 | 3 -> number of columns. Auto: 1 when taller than wide, else 3 for aspect >= 2.0, else 2."""
+    try:
+        n = int(setting)
+    except (TypeError, ValueError):
+        n = 0
+    if n in (1, 2, 3):
+        return n
+    if H > W:
+        return 1
+    return 3 if W / max(1.0, H) >= 2.0 else 2
+
+
+def section_units(sec):
+    return HEAD + FOOT + len(sec.rows)
+
+
+def partition(sections, n):
+    """Split the section list into at most n consecutive, non-empty groups with the smallest possible tallest
+    group (ties: most even). A section is never split. Always returns at least one (possibly empty) group."""
+    if not sections:
+        return [[]]
+    w = [section_units(s) + GAP_UNITS for s in sections]
+    N = len(w)
+    k = max(1, min(int(n), N))
+    pre = [0.0]
+    for x in w:
+        pre.append(pre[-1] + x)
+    best = [[None] * (N + 1) for _ in range(k + 1)]
+    best[0][0] = (0.0, 0.0, None)
+    for j in range(1, k + 1):
+        for i in range(j, N + 1):
+            cand = None
+            for p in range(j - 1, i):
+                prev = best[j - 1][p]
+                if prev is None:
+                    continue
+                seg = pre[i] - pre[p]
+                val = (round(max(prev[0], seg), 6), round(prev[1] + seg * seg, 6), p)
+                if cand is None or val[:2] < cand[:2]:
+                    cand = val
+            best[j][i] = cand
+    cuts, i = [], N
+    for j in range(k, 0, -1):
+        p = best[j][i][2]
+        cuts.append((p, i))
+        i = p
+    return [sections[a:b] for a, b in reversed(cuts)]
+
+
+class Plan:
+    """Result of plan(): everything build() needs to place the columns."""
+    __slots__ = ("W", "H", "ncol", "cols", "m", "g", "gut", "cwc", "rh", "rh_fit", "with_bar", "heights", "fits")
+
+
+def plan(sections, W, H, setting="auto", scale=100):
+    p = Plan()
+    p.W, p.H = W, H
+    p.cols = partition(sections, resolve_columns(setting, W, H))
+    p.ncol = len(p.cols)
+    p.m = max(10.0, min(W, H) * 0.016)
+    p.g = max(8.0, H * 0.005)
+    p.gut = p.m * 0.9 if p.ncol > 1 else 0.0
+    p.cwc = (W - 2 * p.m - (p.ncol - 1) * p.gut) / p.ncol
+    units = [sum(section_units(s) for s in c) for c in p.cols]
+    nsec = [len(c) for c in p.cols]
+    p.rh_fit = min((H - 2 * p.m - n * p.g) / (u + STATUS) for u, n in zip(units, nsec))
+    base = min(p.rh_fit, max(MIN_RH, p.cwc * RH_CAP))
+    try:
+        sc = min(1.5, max(0.8, float(scale) / 100.0))
+    except (TypeError, ValueError):
+        sc = 1.0
+    p.rh = max(MIN_RH, min(p.rh_fit, base * sc))
+    p.heights = [u * p.rh + n * p.g for u, n in zip(units, nsec)]
+    p.fits = 2 * p.m + max(p.heights) + STATUS * p.rh <= H + 0.5
+    p.with_bar = p.cwc >= BAR_MIN_COL_W
+    return p
 
 
 # ------------------------------------------------------------------ colours / limits (gradient)

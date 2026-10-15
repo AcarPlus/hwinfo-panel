@@ -1,4 +1,5 @@
 """HWiNFO Panel: a tkinter dashboard for the HWiNFO64 sensor shared memory (see README.md)."""
+import copy
 import csv
 import math
 import os
@@ -7,12 +8,14 @@ import time
 import tkinter as tk
 import tkinter.font as tkfont
 import traceback
+import types
 
 import config
 import hwctl
 import hwsm
 import i18n
 import layout
+import settings_ui
 from i18n import t
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -68,9 +71,25 @@ def round_rect(cv, x0, y0, x1, y1, r, **kw):
     return cv.create_polygon(pts, smooth=True, **kw)
 
 
-def draw_icon(cv, kind, cx, cy, s, col, bg):
-    """s: half size of the icon. Simple vector icons (no font dependency)."""
+def draw_icon(cv, kind, cx, cy, s, col, bg, tags=()):
+    """s: half size of the icon. Simple vector icons (no font dependency).
+    "gear" (settings button): coloured parts also carry the tag "gear_fill", the hole "gear_hole"."""
     lw = max(2, s / 5)
+    if kind == "gear":
+        for k in range(8):
+            a = math.radians(k * 45 + 22.5)
+            ux, uy = math.cos(a), math.sin(a)
+            px, py = -uy, ux
+            r0, r1, w0, w1 = 0.55 * s, 1.0 * s, 0.30 * s, 0.19 * s
+            cv.create_polygon(cx + ux * r0 + px * w0, cy + uy * r0 + py * w0, cx + ux * r1 + px * w1,
+                              cy + uy * r1 + py * w1, cx + ux * r1 - px * w1, cy + uy * r1 - py * w1,
+                              cx + ux * r0 - px * w0, cy + uy * r0 - py * w0, fill=col, outline="",
+                              tags=tuple(tags) + ("gear_fill",))
+        cv.create_oval(cx - s * 0.74, cy - s * 0.74, cx + s * 0.74, cy + s * 0.74, fill=col, outline="",
+                       tags=tuple(tags) + ("gear_fill",))
+        cv.create_oval(cx - s * 0.30, cy - s * 0.30, cx + s * 0.30, cy + s * 0.30, fill=bg, outline="",
+                       tags=tuple(tags) + ("gear_hole",))
+        return
     if kind == "gauge":
         cv.create_arc(cx - s, cy - s, cx + s, cy + s, start=-30, extent=240, style="arc", outline=col, width=lw)
         ang = math.radians(50)
@@ -135,11 +154,6 @@ def main():
     except Exception:
         pass
 
-    hw_exe = hwctl.detect_hwinfo(cfg["hwinfo_path"])
-    tasks = hwctl.tasks_installed()
-    manage = bool(cfg["manage_hwinfo"]) and tasks
-    sync = bool(cfg["sync_hwinfo_interval"]) and tasks
-
     root = tk.Tk()
     root.title(config.APP_NAME)
     try:
@@ -161,17 +175,35 @@ def main():
     root.attributes("-topmost", bool(cfg["topmost"]))
     root.minsize(400, 480)
 
-    mon = config.pick_monitor(cfg["monitor"])
-    mode = str(cfg["window_mode"]).lower()
+    F_TXT = pick_font("Segoe UI Variable Text", "Segoe UI")
+    F_HEAD = pick_font("Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI")
+    F_NUM = pick_font("Cascadia Mono", "Consolas")
+    cv = tk.Canvas(root, bg=C["bg"], highlightthickness=0, bd=0)
+    cv.pack(fill="both", expand=True)
+
+    logger = Logger(cfg)
+    stats = {}          # row.key -> [min, max, sum, count]; reset at panel start and when recording starts
+    st = {"items": {}, "last": {}, "status": {}, "size": None, "ok": False, "sections": [], "sections_cfg": [],
+          "auto": True, "auto_n": -1, "checked": False, "empty": None, "note": note, "settings": None,
+          "hw_exe": hwctl.detect_hwinfo(cfg["hwinfo_path"]), "tasks": hwctl.tasks_installed(),
+          "mon": config.pick_monitor(cfg["monitor"]), "mode": str(cfg["window_mode"]).lower()}
+
+    def manage_on():
+        return bool(cfg["manage_hwinfo"]) and st["tasks"]
+
+    def sync_on():
+        return bool(cfg["sync_hwinfo_interval"]) and st["tasks"]
 
     def place(final=False):
         """Put the window on the chosen monitor, then maximise / full-screen it."""
+        mon, mode = st["mon"], st["mode"]
         if mon:
             w, h = min(900, mon["ww"] - 40), min(1400, mon["wh"] - 60)
             x, y = mon["wx"] + 20, mon["wy"] + 20
         else:
             w, h = min(900, root.winfo_screenwidth() - 40), min(1400, root.winfo_screenheight() - 80)
             x, y = 20, 20
+        root.attributes("-fullscreen", False)
         root.state("normal")
         root.geometry(f"{w}x{h}+{x}+{y}")
         if not final:
@@ -184,21 +216,11 @@ def main():
 
     place()
 
-    F_TXT = pick_font("Segoe UI Variable Text", "Segoe UI")
-    F_HEAD = pick_font("Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI")
-    F_NUM = pick_font("Cascadia Mono", "Consolas")
-    cv = tk.Canvas(root, bg=C["bg"], highlightthickness=0, bd=0)
-    cv.pack(fill="both", expand=True)
-
-    logger = Logger(cfg)
-    stats = {}          # row.key -> [min, max, sum, count]; reset at panel start and when recording starts
-    st = {"items": {}, "last": {}, "status": {}, "size": None, "ok": False, "sections": [], "auto": True,
-          "auto_n": -1, "checked": False, "empty": None, "note": note}
-
     explicit = cfg["sections"] if isinstance(cfg["sections"], list) else None
     if explicit is not None:
+        st["sections_cfg"] = explicit
         st["sections"] = layout.build_sections(explicit)
-        st["auto"] = not st["sections"]
+        st["auto"] = not layout.build_sections(explicit, include_hidden=True)
         st["checked"] = st["auto"]
 
     spin = tk.Spinbox(root, from_=config.INTERVAL_MIN, to=config.INTERVAL_MAX, increment=0.5, format="%.1f",
@@ -212,112 +234,182 @@ def main():
         if st["ok"]:
             return ""
         h = t("hint_no_shm") if hwctl.proc_running() else t("hint_not_running")
-        if not tasks:
+        if not st["tasks"]:
             h += " · " + t("hint_readonly")
         return h
 
     # ------------------------------------------------------------ drawing
+    def meas_font(family, size, weight="normal"):
+        return tkfont.Font(family=family, size=size, weight=weight)
+
+    def fit_text(font, text, avail):
+        """text, shortened with an ellipsis when it is wider than avail pixels."""
+        if avail <= 0 or font.measure(text) <= avail:
+            return text
+        while len(text) > 1 and font.measure(text + "…") > avail:
+            text = text[:-1]
+        return text + "…"
+
     def build(W, H):
         cv.delete("all")
         st["items"].clear()
         st["last"].clear()
         st["empty"] = None
         sections = st["sections"]
-        nrows = sum(len(s.rows) for s in sections)
-        HEAD, FOOT, STATUS = 1.75, 0.35, 3.0    # in row heights
-        m, g = max(10, W * 0.016), max(8, H * 0.005)
-        rh = (H - 2 * m - len(sections) * g) / (nrows + len(sections) * (HEAD + FOOT) + STATUS)
-        rh = max(14.0, rh)
-        fs_name, fs_num = -max(10, int(rh * 0.50)), -max(10, int(rh * 0.52))
+        HEAD, FOOT, STATUS = layout.HEAD, layout.FOOT, layout.STATUS    # in row heights
+        p = layout.plan(sections, W, H, cfg["columns"], cfg["ui_scale"])
+        rh, m, g = p.rh, p.m, p.g
+        fs_name0, fs_num = -max(10, int(rh * 0.50)), -max(10, int(rh * 0.52))
         fs_small, fs_head = -max(9, int(rh * 0.38)), -max(11, int(rh * 0.62))
-        f_name, f_num = (F_TXT, fs_name), (F_NUM, fs_num)
-        f_unit, f_head, f_col = (F_TXT, fs_small), (F_HEAD, fs_head, "bold"), (F_TXT, fs_small, "bold")
-        cx0, cx1 = m, W - m
-        cw = cx1 - cx0
+        # ----- column geometry (fractions of the column width); no bar column in narrow columns
+        cw = p.cwc
         pad = cw * 0.035
-        col_name = cx0 + pad
-        bar_x0, bar_x1 = cx0 + cw * 0.40, cx0 + cw * 0.53
-        unit_w = tkfont.Font(family=F_TXT, size=fs_small).measure("KB/s")
-        col_now = cx0 + cw * 0.69                  # right edge of the number, unit follows
-        col_min, col_max, col_avg = cx0 + cw * 0.795, cx0 + cw * 0.885, cx1 - pad
-        yy = m
+        if p.with_bar:
+            fr = dict(bar0=0.40, bar1=0.53, now=0.69, mn=0.795, mx=0.885)
+        else:
+            fr = dict(now=0.54, mn=0.725, mx=0.85)
+        # ----- fonts shrink (numbers first) when a column is too narrow for them
+        sample = "8888" if p.with_bar else "88888"        # narrow columns must also fit 5 digits
+        nw0 = meas_font(F_NUM, fs_num).measure(sample)
+        uw0 = meas_font(F_TXT, fs_small).measure("KB/s")
+        fm = min(1.0, (min(fr["mx"] - fr["mn"], 1 - pad / cw - fr["mx"]) * cw - 8) / nw0,
+                 ((fr["mn"] - fr["now"]) * cw - 14) / (nw0 + uw0))
+        fm = max(0.55, fm)
+        fs_num_e, fs_small_e = -max(8, int(-fs_num * fm)), -max(8, int(-fs_small * fm))
+        f_num, f_unit = (F_NUM, fs_num_e), (F_TXT, fs_small_e)
+        f_col = (F_TXT, fs_small_e, "bold")
+        unit_w = meas_font(F_TXT, fs_small_e).measure("KB/s")
+        nw = meas_font(F_NUM, fs_num_e).measure(sample)
+        name_right = (fr["bar0"] * cw - 8) if p.with_bar else (fr["now"] * cw - nw - 10)
+        name_avail = name_right - pad
+        fs_name = fs_name0
+        names = [r.name for s in sections for r in s.rows]
+        longest = max((meas_font(F_TXT, fs_name).measure(n) for n in names), default=0)
+        if longest > name_avail > 0:
+            fs_name = -max(9, int(-fs_name * max(0.75, name_avail / longest)))
+        f_name = (F_TXT, fs_name)
+        fnt_name = meas_font(F_TXT, fs_name)
+        isz = rh * 0.40
+        lbl_now_w = meas_font(F_TXT, fs_small_e, "bold").measure(t("col_now"))
+        # ----- sections, column by column
         if not sections:
             st["empty"] = cv.create_text(W / 2, H * 0.4, text="", justify="center", width=W * 0.8,
                                          font=(F_HEAD, fs_head, "bold"), fill=C["dim"])
-        for sec in sections:
-            accent = sec.color
-            hh, pb = rh * HEAD, rh * FOOT
-            ch = hh + len(sec.rows) * rh + pb
-            round_rect(cv, cx0, yy, cx1, yy + ch, 16, fill=C["card"], outline=C["border"])
-            cv.create_line(cx0 + 1.5, yy + 16, cx0 + 1.5, yy + ch - 16, fill=accent, width=3)
-            hy = yy + hh * 0.5
-            isz = rh * 0.40
-            bubble = mix(C["card"], accent, 0.16)
-            cv.create_oval(col_name, hy - isz * 1.6, col_name + isz * 3.2, hy + isz * 1.6, fill=bubble, outline="")
-            draw_icon(cv, sec.icon, col_name + isz * 1.6, hy, isz, accent, bubble)
-            cv.create_text(col_name + isz * 3.9, hy, text=sec.title, anchor="w", font=f_head, fill=C["fg"])
-            for lbl, xx in ((t("col_now"), col_now + 6 + unit_w), (t("col_min"), col_min),
-                            (t("col_max"), col_max), (t("col_avg"), col_avg)):
-                cv.create_text(xx, hy, text=lbl, anchor="e", font=f_col, fill=mix(C["dim"], accent, 0.45))
-            cv.create_line(cx0 + pad * 0.6, yy + hh - 1, cx1 - pad * 0.6, yy + hh - 1, fill=C["border"])
-            ry = yy + hh
-            for i, row in enumerate(sec.rows):
-                if i % 2:
-                    cv.create_rectangle(cx0 + 6, ry, cx1 - 6, ry + rh, fill=C["stripe"], outline="")
-                my = ry + rh / 2
-                cv.create_text(col_name, my, text=row.name, anchor="w", font=f_name, fill=C["name"])
-                it = {"accent": accent}
-                if row.bar:
-                    bh = max(4, rh * 0.22)
-                    round_rect(cv, bar_x0, my - bh / 2, bar_x1, my + bh / 2, bh / 2, fill=C["track"], outline="")
-                    it["bar"] = cv.create_rectangle(bar_x0, my - bh / 2, bar_x0, my + bh / 2, fill=accent,
-                                                    outline="")
-                    it["bargeo"] = (bar_x0, bar_x1, my - bh / 2, my + bh / 2)
-                it["now"] = cv.create_text(col_now, my, text="–", anchor="e", font=f_num, fill=C["fg"])
-                it["unit"] = cv.create_text(col_now + 6, my, text=row.unit_eff, anchor="w", font=f_unit,
-                                            fill=C["faint"])
-                for k, xx in (("min", col_min), ("max", col_max), ("avg", col_avg)):
-                    it[k] = cv.create_text(xx, my, text="–", anchor="e", font=f_num, fill=C["dim"])
-                st["items"][id(row)] = it
-                ry += rh
-            yy += ch + g
-        # ----- status bar (2 lines: controls + info)
-        sb_h = rh * (STATUS - 0.2)
+        for ci, col_secs in enumerate(p.cols):
+            cx0 = m + ci * (cw + p.gut)
+            cx1 = cx0 + cw
+            col_name = cx0 + pad
+            bar_x0, bar_x1 = cx0 + cw * fr.get("bar0", 0), cx0 + cw * fr.get("bar1", 0)
+            col_now = cx0 + cw * fr["now"]                  # right edge of the number, unit follows
+            col_min, col_max, col_avg = cx0 + cw * fr["mn"], cx0 + cw * fr["mx"], cx1 - pad
+            yy = m
+            for sec in col_secs:
+                accent = sec.color
+                hh, pb = rh * HEAD, rh * FOOT
+                ch = hh + len(sec.rows) * rh + pb
+                round_rect(cv, cx0, yy, cx1, yy + ch, 16, fill=C["card"], outline=C["border"])
+                cv.create_line(cx0 + 1.5, yy + 16, cx0 + 1.5, yy + ch - 16, fill=accent, width=3)
+                hy = yy + hh * 0.5
+                bubble = mix(C["card"], accent, 0.16)
+                cv.create_oval(col_name, hy - isz * 1.6, col_name + isz * 3.2, hy + isz * 1.6, fill=bubble, outline="")
+                draw_icon(cv, sec.icon, col_name + isz * 1.6, hy, isz, accent, bubble)
+                title_x = col_name + isz * 3.9
+                title_avail = (col_now + 6 + unit_w - lbl_now_w) - title_x - 10
+                hs = -fs_head
+                f_title = meas_font(F_HEAD, -hs, "bold")
+                if f_title.measure(sec.title) > title_avail > 0:
+                    hs = max(10, int(hs * max(0.7, title_avail / f_title.measure(sec.title))))
+                    f_title = meas_font(F_HEAD, -hs, "bold")
+                cv.create_text(title_x, hy, text=fit_text(f_title, sec.title, title_avail), anchor="w",
+                               font=(F_HEAD, -hs, "bold"), fill=C["fg"])
+                for lbl, xx in ((t("col_now"), col_now + 6 + unit_w), (t("col_min"), col_min),
+                                (t("col_max"), col_max), (t("col_avg"), col_avg)):
+                    cv.create_text(xx, hy, text=lbl, anchor="e", font=f_col, fill=mix(C["dim"], accent, 0.45))
+                cv.create_line(cx0 + pad * 0.6, yy + hh - 1, cx1 - pad * 0.6, yy + hh - 1, fill=C["border"])
+                ry = yy + hh
+                for i, row in enumerate(sec.rows):
+                    if i % 2:
+                        cv.create_rectangle(cx0 + 6, ry, cx1 - 6, ry + rh, fill=C["stripe"], outline="")
+                    my = ry + rh / 2
+                    cv.create_text(col_name, my, text=fit_text(fnt_name, row.name, name_avail), anchor="w",
+                                   font=f_name, fill=C["name"])
+                    it = {"accent": accent}
+                    if row.bar and p.with_bar:
+                        bh = max(4, rh * 0.22)
+                        round_rect(cv, bar_x0, my - bh / 2, bar_x1, my + bh / 2, bh / 2, fill=C["track"], outline="")
+                        it["bar"] = cv.create_rectangle(bar_x0, my - bh / 2, bar_x0, my + bh / 2, fill=accent,
+                                                        outline="")
+                        it["bargeo"] = (bar_x0, bar_x1, my - bh / 2, my + bh / 2)
+                    it["now"] = cv.create_text(col_now, my, text="–", anchor="e", font=f_num, fill=C["fg"])
+                    it["unit"] = cv.create_text(col_now + 6, my, text=row.unit_eff, anchor="w", font=f_unit,
+                                                fill=C["faint"])
+                    for k, xx in (("min", col_min), ("max", col_max), ("avg", col_avg)):
+                        it[k] = cv.create_text(xx, my, text="–", anchor="e", font=f_num, fill=C["dim"])
+                    st["items"][id(row)] = it
+                    ry += rh
+                yy += ch + g
+        # ----- status bar (full width, 2 lines: controls + info)
+        sx0, sx1 = m, W - m
+        sw_span = sx1 - sx0
+        rs = min(rh, max(layout.MIN_RH, sw_span * 0.042))      # its text must not grow with a huge row height
+        spad = min(sw_span * 0.035, rs * 1.0)
+        col_name = sx0 + spad
+        sb_h = rs * (STATUS - 0.2)
         sy = H - m - sb_h
-        round_rect(cv, cx0, sy, cx1, sy + sb_h, 16, fill=C["card"], outline=C["border"])
+        round_rect(cv, sx0, sy, sx1, sy + sb_h, 16, fill=C["card"], outline=C["border"])
         my = sy + sb_h * 0.36
         iy = sy + sb_h * 0.76
-        pw = cw * 0.25
+        pw = min(sw_span * 0.25, max(rs * 6.8, 130))
         s = st["status"]
-        s["pill"] = round_rect(cv, col_name - 6, my - rh * 0.55, col_name - 6 + pw, my + rh * 0.55, rh * 0.52,
+        s["pill"] = round_rect(cv, col_name - 6, my - rs * 0.55, col_name - 6 + pw, my + rs * 0.55, rs * 0.52,
                                fill=C["track"], outline="", tags="logbtn")
-        s["dot"] = cv.create_oval(col_name + rh * 0.2, my - rh * 0.18, col_name + rh * 0.56, my + rh * 0.18,
+        s["dot"] = cv.create_oval(col_name + rs * 0.2, my - rs * 0.18, col_name + rs * 0.56, my + rs * 0.18,
                                   fill=C["red"], outline="", tags="logbtn")
-        s["txt"] = cv.create_text(col_name + rh * 0.8, my, text="", anchor="w",
-                                  font=(F_TXT, fs_name, "bold"), fill=C["fg"], tags="logbtn")
+        s["txt"] = cv.create_text(col_name + rs * 0.8, my, text="", anchor="w",
+                                  font=(F_TXT, -max(10, int(rs * 0.50)), "bold"), fill=C["fg"], tags="logbtn")
         # recording mode switch: required rows <-> all sensors
-        f_sw = (F_TXT, fs_small, "bold")
-        sw_w, sw_h = rh * 1.7, rh * 0.8
-        lx = col_name - 6 + pw + cw * 0.05
+        fs_sw = -max(9, int(rs * 0.38))
+        f_sw = (F_TXT, fs_sw, "bold")
+        sw_w, sw_h = rs * 1.7, rs * 0.8
+        lx = col_name - 6 + pw + min(sw_span * 0.05, rs * 1.2)
         s["sw_l"] = cv.create_text(lx, my, text=t("sw_required"), anchor="w", font=f_sw, fill=C["fg"],
                                    tags="modebtn")
-        tx0 = lx + tkfont.Font(family=F_TXT, size=fs_small, weight="bold").measure(t("sw_required")) + rh * 0.35
+        tx0 = lx + tkfont.Font(family=F_TXT, size=fs_sw, weight="bold").measure(t("sw_required")) + rs * 0.35
         s["sw_track"] = round_rect(cv, tx0, my - sw_h / 2, tx0 + sw_w, my + sw_h / 2, sw_h / 2,
                                    fill=C["track"], outline=C["border"], tags="modebtn")
         kr = sw_h / 2 - 3
         s["sw_geo"] = (tx0 + 3 + kr, tx0 + sw_w - 3 - kr, my, kr)
         kx = s["sw_geo"][1] if cfg.get("log_all") else s["sw_geo"][0]
         s["sw_knob"] = cv.create_oval(kx - kr, my - kr, kx + kr, my + kr, fill=C["fg"], outline="", tags="modebtn")
-        s["sw_r"] = cv.create_text(tx0 + sw_w + rh * 0.35, my, text=t("sw_all"), anchor="w", font=f_sw,
+        s["sw_r"] = cv.create_text(tx0 + sw_w + rs * 0.35, my, text=t("sw_all"), anchor="w", font=f_sw,
                                    fill=C["faint"], tags="modebtn")
-        cv.create_text(cx1 - pad - cw * 0.115, my, text=t("interval_lbl"), anchor="e", font=f_unit, fill=C["dim"])
-        spin.config(font=(F_NUM, fs_num))
-        cv.create_window(cx1 - pad, my, window=spin, anchor="e", width=cw * 0.1, height=rh * 1.0)
-        s["info"] = cv.create_text(col_name, iy, text="", anchor="w", font=f_unit, fill=C["dim"])
-        for tag, fn in (("logbtn", toggle), ("modebtn", toggle_mode)):
+        # right end: [interval label] [spinbox] [gear button]
+        gs = max(rs * 0.42, 8.0)
+        hit = gs * 1.45
+        gx = sx1 - spad - hit
+        s["gear_bg"] = cv.create_oval(gx - hit, my - hit, gx + hit, my + hit, fill=C["card"], outline="",
+                                      tags="gearbtn")
+        draw_icon(cv, "gear", gx, my, gs, C["dim"], C["card"], tags=("gearbtn",))
+        spin_w = max(44.0, min(sw_span * 0.1, rs * 3.2))
+        spin_r = gx - hit - 6
+        cv.create_text(spin_r - spin_w - 8, my, text=t("interval_lbl"), anchor="e", font=(F_TXT, fs_sw),
+                       fill=C["dim"])
+        spin.config(font=(F_NUM, -max(10, int(rs * 0.52))))
+        cv.create_window(spin_r, my, window=spin, anchor="e", width=spin_w, height=rs * 1.0)
+        s["info"] = cv.create_text(col_name, iy, text="", anchor="w", font=(F_TXT, fs_sw), fill=C["dim"])
+        for tag, fn in (("logbtn", toggle), ("modebtn", toggle_mode), ("gearbtn", open_settings)):
             cv.tag_bind(tag, "<Button-1>", fn)
             cv.tag_bind(tag, "<Enter>", lambda e: cv.config(cursor="hand2"))
             cv.tag_bind(tag, "<Leave>", lambda e: cv.config(cursor=""))
+
+        def gear_hover(on):
+            acc = layout.ICON_COLORS["gauge"]
+            bgc = mix(C["card"], acc, 0.16) if on else C["card"]
+            cv.itemconfig("gear_fill", fill=acc if on else C["dim"])
+            cv.itemconfig("gear_hole", fill=bgc)
+            cv.itemconfig(s["gear_bg"], fill=bgc)
+        cv.tag_bind("gearbtn", "<Enter>", lambda e: (cv.config(cursor="hand2"), gear_hover(True)))
+        cv.tag_bind("gearbtn", "<Leave>", lambda e: (cv.config(cursor=""), gear_hover(False)))
         refresh_status()
 
     def set_text(iid, txt, color=None):
@@ -407,7 +499,7 @@ def main():
         spin.delete(0, "end")
         spin.insert(0, f"{v:.1f}")
         config.save_keys(cfg, "interval")
-        if sync:
+        if sync_on():
             # wait 1.5 s so that clicking the spinbox arrows does not restart HWiNFO on every step
             if pending.get("apply"):
                 root.after_cancel(pending["apply"])
@@ -415,7 +507,7 @@ def main():
 
     def push_interval():
         pending["apply"] = None
-        ms = hwctl.apply_hwinfo_interval(cfg["interval"], hw_exe)
+        ms = hwctl.apply_hwinfo_interval(cfg["interval"], st["hw_exe"])
         if ms:
             st["last_restart"] = time.time()      # no automatic recovery while HWiNFO restarts
             st["applying"] = (time.time(), ms)
@@ -424,11 +516,17 @@ def main():
         if root.focus_get() is not spin:
             toggle()
 
+    def key_settings(e):
+        if root.focus_get() is not spin:
+            open_settings()
+
     spin.config(command=set_interval)
     spin.bind("<Return>", lambda e: (set_interval(), cv.focus_set()))
     spin.bind("<FocusOut>", set_interval)
     root.bind("<KeyPress-l>", key_toggle)
     root.bind("<KeyPress-L>", key_toggle)
+    root.bind("<KeyPress-s>", key_settings)
+    root.bind("<KeyPress-S>", key_settings)
     cv.bind("<Button-1>", lambda e: cv.focus_set(), add="+")
     root.bind("<F11>", lambda e: root.attributes("-fullscreen", not root.attributes("-fullscreen")))
     root.bind("<Escape>", lambda e: root.attributes("-fullscreen", False))
@@ -444,27 +542,133 @@ def main():
     cv.bind("<Configure>", on_resize)
 
     # ------------------------------------------------------------ layout resolution
+    def set_layout_cfg(cfg_list):
+        st["sections_cfg"] = cfg_list
+        st["sections"] = layout.build_sections(cfg_list)
+
     def ensure_layout(rd):
         """Explicit layout: if none of its rows exists on this PC, fall back to auto-detection.
         Auto layout: (re)detect whenever the set of readings changes in size."""
         changed = False
         if not st["checked"]:
             st["checked"] = True
-            if layout.count_matches(st["sections"], rd) == 0:
+            if layout.count_matches(layout.build_sections(st["sections_cfg"], include_hidden=True), rd) == 0:
                 st["auto"] = True
-                st["sections"] = []
+                set_layout_cfg([])
                 changed = True
         if st["auto"] and len(rd) != st["auto_n"]:
             st["auto_n"] = len(rd)
-            new = layout.build_sections(layout.autodetect(rd))
+            new_cfg = layout.autodetect(rd)
+            new = layout.build_sections(new_cfg)
             old_sig = [r.key for r in layout.all_rows(st["sections"])]
             if [r.key for r in layout.all_rows(new)] != old_sig:
-                st["sections"] = new
+                st["sections_cfg"], st["sections"] = new_cfg, new
                 changed = True
         if changed:
             logger.close()
             if st["size"]:
                 build(*st["size"])
+
+    # ------------------------------------------------------------ settings window
+    def read_now():
+        try:
+            return hwsm.read_all()
+        except Exception:
+            return []
+
+    def layout_snapshot():
+        """(is_auto, deep copy of the effective layout in config form incl. hidden rows)."""
+        return st["auto"], copy.deepcopy(st["sections_cfg"])
+
+    def panel_monitor():
+        """The monitor the panel window is on (for centring dialogs)."""
+        try:
+            cx = root.winfo_rootx() + root.winfo_width() // 2
+            cy = root.winfo_rooty() + root.winfo_height() // 2
+            for mo in config.monitors():
+                if mo["x"] <= cx < mo["x"] + mo["w"] and mo["y"] <= cy < mo["y"] + mo["h"]:
+                    return mo
+        except Exception:
+            pass
+        return st["mon"]
+
+    def refresh_tasks():
+        st["tasks"] = hwctl.tasks_installed(refresh=True)
+        return st["tasks"]
+
+    def apply_settings(changes, lay_mode="keep", lay_cfg=None):
+        """Apply settings live. changes: {config key: new value}; lay_mode: 'keep' | 'auto' | 'explicit'.
+        Returns False when config.json could not be written (the settings are still applied)."""
+        real = {k: v for k, v in changes.items() if cfg.get(k) != v}
+        cfg.update(real)
+        keys = list(real)
+        need_build = bool({"columns", "ui_scale", "language"} & set(real))
+        if "language" in real:
+            i18n.set_language(cfg["language"])
+            if st["auto"]:
+                st["auto_n"] = -1          # titles / names of the detected layout are language dependent
+                rd = read_now()
+                if rd:
+                    ensure_layout(rd)
+        if lay_mode == "auto":
+            cfg["sections"] = "auto"
+            keys.append("sections")
+            st["auto"], st["checked"], st["auto_n"] = True, True, -1
+            set_layout_cfg([])
+            logger.close()
+            need_build = True
+            ensure_layout(read_now())
+        elif lay_mode == "explicit":
+            cfg["sections"] = copy.deepcopy(lay_cfg or [])
+            keys.append("sections")
+            st["auto"], st["checked"] = False, True
+            set_layout_cfg(cfg["sections"])
+            logger.close()
+            need_build = True
+        if "topmost" in real:
+            root.attributes("-topmost", bool(cfg["topmost"]))
+        if "hwinfo_path" in real:
+            st["hw_exe"] = hwctl.detect_hwinfo(cfg["hwinfo_path"])
+        if {"log_dir", "csv_delimiter", "csv_decimal", "log_all", "logging"} & set(real):
+            if "logging" in real and cfg["logging"]:
+                stats.clear()
+            logger.close()                 # next row starts a new file with the new folder / format / mode
+            logger.delim, logger.dec = config.csv_format(cfg)
+            logger.last = 0
+        if "log_all" in real and st["status"]:
+            animate_knob(st["status"]["sw_geo"][1] if cfg["log_all"] else st["status"]["sw_geo"][0])
+        if "interval" in real or ("sync_hwinfo_interval" in real and cfg["sync_hwinfo_interval"]):
+            spin.delete(0, "end")
+            spin.insert(0, f"{cfg['interval']:.1f}")
+            set_interval()
+        ok = config.save_keys(cfg, *keys) if keys else True
+        if "monitor" in real or "window_mode" in real:
+            st["mon"] = config.pick_monitor(cfg["monitor"])
+            st["mode"] = str(cfg["window_mode"]).lower()
+            place(final=True)
+        if need_build and st["size"]:
+            build(*st["size"])
+        refresh_status()
+        return ok
+
+    api = types.SimpleNamespace(root=root, cfg=cfg, C=C, fonts=(F_TXT, F_HEAD, F_NUM), apply=apply_settings, layout=layout_snapshot, readings=read_now,
+                                monitor=panel_monitor, refresh_tasks=refresh_tasks,
+                                detect=hwctl.detect_hwinfo, monitors=config.monitors)
+
+    def open_settings(e=None):
+        w = st["settings"]
+        try:
+            if w is not None and w.winfo_exists():
+                w.deiconify()
+                w.lift()
+                w.focus_force()
+                return
+        except tk.TclError:
+            pass
+        try:
+            st["settings"] = settings_ui.SettingsWindow(api)
+        except Exception:
+            traceback.print_exc()
 
     # ------------------------------------------------------------ data
     def tick():
@@ -480,14 +684,14 @@ def main():
         if ok and st.get("was_down"):
             # HWiNFO just started: first readings may be missing / zero; hold the old values for a few rounds
             st["was_down"] = False
-            st["warm_until"] = now + max(3.0, 2.5 * hwctl.hwinfo_interval_ms(hw_exe) / 1000)
+            st["warm_until"] = now + max(3.0, 2.5 * hwctl.hwinfo_interval_ms(st["hw_exe"]) / 1000)
         if not ok:
             st["was_down"] = True
         frozen = (not ok) or now < st.get("warm_until", 0)
         st["frozen"] = frozen
         if ok:
             st["down_since"] = None
-        elif manage:
+        elif manage_on():
             # e.g. the 12 h limit of the free version: no connection for 20 s -> restart HWiNFO (at most every 5 min)
             t0 = st.get("down_since") or now
             st["down_since"] = t0
@@ -539,15 +743,15 @@ def main():
 
     def on_close():
         logger.close()
-        if manage:
+        if manage_on():
             hwctl.run_task(hwctl.TASK_STOP)
         root.destroy()
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     st["last_restart"] = time.time()
-    if sync and hwctl.apply_hwinfo_interval(cfg["interval"], hw_exe):
+    if sync_on() and hwctl.apply_hwinfo_interval(cfg["interval"], st["hw_exe"]):
         pass                                          # the task adjusted the interval and (re)started HWiNFO
-    elif manage and not hwctl.proc_running():
+    elif manage_on() and not hwctl.proc_running():
         hwctl.run_task(hwctl.TASK_START)
     # when opened from a shortcut Windows puts the window on the clicked screen: move it, then maximise
     root.after(200, lambda: place(final=True))
