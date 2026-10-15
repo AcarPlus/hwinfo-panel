@@ -24,8 +24,8 @@ DisableProgramGroupPage=yes
 DisableDirPage=auto
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
-SetupIconFile=..\panel.ico
-LicenseFile=..\LICENSE
+SetupIconFile=..\src\panel.ico
+LicenseFile=..\docs\LICENSE
 OutputDir=Output
 OutputBaseFilename=HWiNFO-Panel-Setup-{#AppVersion}
 Compression=lzma2
@@ -63,10 +63,10 @@ Type: filesandordirs; Name: "{app}\_internal"
 [Files]
 Source: "..\dist\HWiNFO Panel\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; what the scheduled tasks run: lives under Program Files (writable by administrators only)
-Source: "..\hidden.vbs"; DestDir: "{app}\tasks"; Flags: ignoreversion
-Source: "..\set_interval.ps1"; DestDir: "{app}\tasks"; Flags: ignoreversion
+Source: "..\src\hidden.vbs"; DestDir: "{app}\tasks"; Flags: ignoreversion
+Source: "..\src\set_interval.ps1"; DestDir: "{app}\tasks"; Flags: ignoreversion
 Source: "register_tasks.ps1"; DestDir: "{app}\tasks"; Flags: ignoreversion
-Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppId}"

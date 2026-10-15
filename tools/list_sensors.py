@@ -11,7 +11,7 @@ Output columns: sensor (orig) | label (orig) | type | unit | value
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 import backend  # noqa: E402
 import config  # noqa: E402
 import hwsm  # noqa: E402

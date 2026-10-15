@@ -8,7 +8,8 @@ from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct, VSVersionInfo)
 
 ROOT = os.path.dirname(SPECPATH)
-with open(os.path.join(ROOT, "version.py"), encoding="utf-8") as _f:
+SRC = os.path.join(ROOT, "src")
+with open(os.path.join(SRC, "version.py"), encoding="utf-8") as _f:
     VERSION = re.search(r'__version__\s*=\s*"([^"]+)"', _f.read()).group(1)
 _nums = (tuple(int(x) for x in re.findall(r"\d+", VERSION)) + (0, 0, 0, 0))[:4]
 
@@ -34,15 +35,15 @@ with open(_work, "w", encoding="utf-8") as _f:
     _f.write(str(_vi))
 
 a = Analysis(
-    [os.path.join(ROOT, "panel.py")],
-    pathex=[ROOT],
+    [os.path.join(SRC, "panel.py")],
+    pathex=[SRC],
     binaries=[],
     # read at run time from sys._MEIPASS (see config.APP_DIR); hidden.vbs / set_interval.ps1 are what the
     # scheduled tasks run (the Setup copies them to {app}\tasks, install.ps1 users do not need the bundle)
     datas=[
-        (os.path.join(ROOT, "panel.ico"), "."),
-        (os.path.join(ROOT, "hidden.vbs"), "."),
-        (os.path.join(ROOT, "set_interval.ps1"), "."),
+        (os.path.join(SRC, "panel.ico"), "."),
+        (os.path.join(SRC, "hidden.vbs"), "."),
+        (os.path.join(SRC, "set_interval.ps1"), "."),
     ],
     hiddenimports=['psutil'],
     hookspath=[],
@@ -57,7 +58,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="HWiNFO Panel",
-    icon=os.path.join(ROOT, "panel.ico"),
+    icon=os.path.join(SRC, "panel.ico"),
     version=_work,
     console=False,
     debug=False,

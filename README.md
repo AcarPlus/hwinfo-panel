@@ -41,7 +41,7 @@ Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
 - 256-step green to red colour gradient per row from its limits (reversed limits for FPS: low = red).
 - **CSV logging**: every on/off session writes a new file; "required rows" or "all sensors" (slide switch);
   interval 0.5 to 30 s (spin box in the panel). Press `L` to toggle recording, `S` for settings, `F11` for full screen.
-- Optional (after `install.ps1`): the panel **starts HWiNFO when it opens and stops it when it closes**, writes the
+- Optional (after `scripts\install.ps1`): the panel **starts HWiNFO when it opens and stops it when it closes**, writes the
   logging interval to HWiNFO's `SensorInterval`, and restarts HWiNFO automatically when the shared memory is gone for
   more than 20 s (the free HWiNFO version stops its sensors after 12 hours). Without this the panel runs in read-only
   mode and shows a hint when HWiNFO is not running.
@@ -77,7 +77,7 @@ Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
 | Drive temperatures | ✓ | ✓ | ✗ |
 | Network, disk throughput | ✓ | ✓ | ✓ |
 | FPS | ✓ (HWiNFO's PresentMon) | optional, PresentMon (experimental) | optional, PresentMon (experimental) |
-| Panel starts / stops it, interval sync, auto restart | ✓ (with `install.ps1`) | – | – |
+| Panel starts / stops it, interval sync, auto restart | ✓ (with `scripts\install.ps1`) | – | – |
 
 CPU temperatures, fans, voltages and CPU power can only be read through a **signed kernel driver**: that is what
 HWiNFO and LibreHardwareMonitor install. Windows itself does not expose them to normal programs, so the built-in source
@@ -129,7 +129,7 @@ source version is taken over on first start.
 3. In PowerShell, in this folder:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File install.ps1
+   powershell -ExecutionPolicy Bypass -File scripts\install.ps1
    ```
 
    * creates the Start Menu shortcut **HWiNFO Panel** (with its own taskbar icon),
@@ -139,7 +139,7 @@ source version is taken over on first start.
      administrator rights) without a UAC prompt each time. Use `-NoTasks` to skip this part.
    * `-HwinfoPath "D:\Tools\HWiNFO64\HWiNFO64.EXE"` if your HWiNFO is not found automatically.
 
-   You can also skip the installer completely: `pythonw panel.py` (or `python panel.py`) works, in read-only mode.
+   You can also skip the installer completely: `pythonw src\panel.py` (or `python src\panel.py`) works, in read-only mode.
 
 4. Start **HWiNFO Panel** from the Start Menu.
 
@@ -154,10 +154,10 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1               # dis
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip -Installer   # + portable zip and Setup (needs Inno Setup 6)
 ```
 
-The Setup is described by `packaging\setup.iss` (output in `packaging\Output`); the version comes from `version.py`.
+The Setup is described by `packaging\setup.iss` (compiled to `packaging\Output`, and the Setup exe is copied to the repo root); the version comes from `src\version.py`.
 Pushing a tag `v*` builds and publishes both files via GitHub Actions (`.github/workflows/release.yml`).
 
-Uninstall (source install): `powershell -ExecutionPolicy Bypass -File uninstall.ps1` removes the tasks, the Program Files folder and the
+Uninstall (source install): `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1` removes the tasks, the Program Files folder and the
 shortcut and keeps your settings and logs; add `-Purge` to delete them as well.
 
 Security note: the tasks run only the two files in `%ProgramFiles%\HWiNFO Panel` (writable by administrators only).
@@ -183,7 +183,7 @@ Set the environment variable `HWINFO_PANEL_DIR` to use another folder (portable 
 |---|---|---|
 | `backend` | `"auto"`, `"hwinfo"`, `"lhm"`, `"builtin"` | data source, see [Data sources](#data-sources) |
 | `language` | `"auto"`, `"tr"`, `"en"` | UI language (`auto` = Windows display language) |
-| `monitor` | `"auto"` or index | `auto` = first non-primary portrait monitor, otherwise the primary one. Indexes: `python tools/list_monitors.py` |
+| `monitor` | `"auto"` or index | `auto` = first non-primary portrait monitor, otherwise the primary one. Indexes: `python tools\list_monitors.py` |
 | `window_mode` | `"maximized"`, `"fullscreen"`, `"window"` | how the window is placed on that monitor |
 | `columns` | `"auto"`, `1`, `2`, `3` | number of columns; `auto` = 1 on a portrait window, otherwise 3 if width / height is 2.0 or more, else 2. Whole sections are distributed in order, a section is never split |
 | `ui_scale` | 80 to 150 | row height / font scale in percent (rows never exceed the available height) |
@@ -207,8 +207,8 @@ With `"sections": "auto"` the layout is detected from your sensors each time the
 detected layout into `config.json`:
 
 ```
-python tools/export_layout.py                     # data source from config.json
-python tools/export_layout.py --backend builtin   # or hwinfo / lhm
+python tools\export_layout.py                     # data source from config.json
+python tools\export_layout.py --backend builtin   # or hwinfo / lhm
 ```
 
 and change the `sections` list, or use the layout tab of the settings window (it writes the same list; "Reset to
@@ -244,9 +244,9 @@ The sources name their sensors differently, so each one has its own key: `sectio
   it in the file; the settings window sets it.
 * `limits`: `[green_value, red_value]`: the colour moves from green to red between them (a bigger green value than
   red value reverses it, as for FPS). Without `limits` the row has no bar / gradient. `bar`: `false` hides the bar.
-* To find the names on your PC: `python tools/list_sensors.py` (optionally with filter words:
-  `python tools/list_sensors.py gpu temp`, or another source: `--backend builtin`). The output may contain serial
-  numbers; do not post it publicly. `python tools/check_layout.py [--backend …]` checks that every row finds a reading.
+* To find the names on your PC: `python tools\list_sensors.py` (optionally with filter words:
+  `python tools\list_sensors.py gpu temp`, or another source: `--backend builtin`). The output may contain serial
+  numbers; do not post it publicly. `python tools\check_layout.py [--backend …]` checks that every row finds a reading.
 
 ### CSV format
 
@@ -265,9 +265,9 @@ this PC (`127.0.0.1` by default) or Windows' own counters, and writes only the f
 * "HWiNFO is running but shared memory is off": enable *Shared Memory Support* in HWiNFO's settings and restart it.
 * "LibreHardwareMonitor not reachable": start LHM and enable *Options > Remote Web Server > Run*.
 * No CPU temperature / fans with the built-in source: expected, see [Data sources](#data-sources).
-* Values freeze every 12 hours with the free HWiNFO: install the tasks (`install.ps1`) for automatic restart.
-* Wrong monitor: `python tools/list_monitors.py`, then set `"monitor"`.
-* Python icon instead of the panel icon in the taskbar when started with `python panel.py`: use the Start Menu shortcut.
+* Values freeze every 12 hours with the free HWiNFO: install the tasks (`scripts\install.ps1`) for automatic restart.
+* Wrong monitor: `python tools\list_monitors.py`, then set `"monitor"`.
+* Python icon instead of the panel icon in the taskbar when started with `python src\panel.py`: use the Start Menu shortcut.
 * Crash on start: see `%LOCALAPPDATA%\HWiNFO Panel\panel.log`.
 
 ## Development
@@ -277,7 +277,7 @@ this PC (`127.0.0.1` by default) or Windows' own counters, and writes only the f
 `layout.py` (rows, matching, auto-detection), `config.py` (settings, monitors),
 `hwctl.py` (HWiNFO detection and tasks), `i18n.py` (strings), `panel.py` (UI), `settings_ui.py` (settings window),
 `winicon.py` (taskbar identity), `version.py`, `packaging/` (PyInstaller spec, Inno Setup script, build script),
-`make_icon.py` (regenerates `panel.ico`). License: MIT.
+`src\make_icon.py` (regenerates `panel.ico`). License: [MIT](docs/LICENSE).
 
 ---
 
@@ -303,7 +303,7 @@ CSV dosyasına kaydeder. HWiNFO / REALiX veya LibreHardwareMonitor projesiyle ba
 | Disk sıcaklıkları | ✓ | ✓ | ✗ |
 | Ağ, disk hızı | ✓ | ✓ | ✓ |
 | FPS | ✓ (HWiNFO'nun PresentMon'u) | isteğe bağlı, PresentMon (deneysel) | isteğe bağlı, PresentMon (deneysel) |
-| Panelin açıp kapatması, aralık eşitleme, otomatik yeniden başlatma | ✓ (`install.ps1` ile) | – | – |
+| Panelin açıp kapatması, aralık eşitleme, otomatik yeniden başlatma | ✓ (`scripts\install.ps1` ile) | – | – |
 
 CPU sıcaklıkları, fanlar, voltajlar ve CPU gücü yalnızca **imzalı bir çekirdek sürücüsü** ile okunabilir (HWiNFO ve
 LibreHardwareMonitor bunu kurar); Windows bu verileri normal programlara vermez, bu yüzden yerleşik kaynak gösteremez.
@@ -324,8 +324,8 @@ onayıyla, bir kez) HWiNFO'yu her seferinde UAC sormadan açıp kapatan 3 zamanl
 salt okunur çalışır (HWiNFO'yu kurup Setup'ı yeniden çalıştırın). Kaldırma: Ayarlar > Uygulamalar (ayarlar ve kayıtlar
 `%LOCALAPPDATA%\HWiNFO Panel` altında kalır). (2) **Taşınabilir zip:** açın, `HWiNFO Panel.exe` çalıştırın (görev yok,
 salt okunur). (3) **Kaynaktan:** klasörü bir yere koyun, HWiNFO'da Shared Memory Support'u açın, bu klasörde
-`powershell -ExecutionPolicy Bypass -File install.ps1` çalıştırın (`-NoTasks` ile görevler atlanır). Kaldırma:
-`uninstall.ps1` (ayarlar ve kayıtlar kalır, silmek için `-Purge`).
+`powershell -ExecutionPolicy Bypass -File scripts\install.ps1` çalıştırın (`-NoTasks` ile görevler atlanır). Kaldırma:
+`scripts\uninstall.ps1` (ayarlar ve kayıtlar kalır, silmek için `-Purge`).
 **Uyarı:** sürümler henüz imzalı değildir; SmartScreen "bilinmeyen yayıncı" uyarısı gösterebilir ("Daha fazla bilgi" >
 "Yine de çalıştır"), **Akıllı Uygulama Denetimi** (Smart App Control) açıksa imzasız .exe'yi tamamen engelleyebilir
 (bu durumda kaynaktan çalıştırın). **Yerelde derleme:** `powershell -ExecutionPolicy Bypass -File packaging\build.ps1`
@@ -333,10 +333,10 @@ salt okunur). (3) **Kaynaktan:** klasörü bir yere koyun, HWiNFO'da Shared Memo
 
 **Ayarlar:** `%LOCALAPPDATA%\HWiNFO Panel\config.json` ilk açılışta oluşur. `language` (`auto`/`tr`/`en`), `monitor`,
 `window_mode`, `interval`, `log_dir`, `manage_hwinfo` vb. yukarıdaki tabloda açıklanmıştır. Düzen varsayılan olarak
-donanımınızdan otomatik üretilir; düzenlemek için `python tools/export_layout.py` ile `sections` listesini yazdırıp
+donanımınızdan otomatik üretilir; düzenlemek için `python tools\export_layout.py` ile `sections` listesini yazdırıp
 elle değiştirin. Her veri kaynağının kendi düzeni vardır: `sections` (HWiNFO), `sections_lhm`, `sections_builtin`.
 Sensör ve etiket kalıpları **İngilizce orijinal adlara** göre (düzenli ifade) eşleşir; adları görmek için
-`python tools/list_sensors.py` (başka kaynak için `--backend builtin`) kullanın (çıktıda seri numaraları olabilir,
+`python tools\list_sensors.py` (başka kaynak için `--backend builtin`) kullanın (çıktıda seri numaraları olabilir,
 paylaşmayın).
 
 **Ayarlar penceresi:** durum çubuğunda aralık kutusunun yanındaki dişli düğmesi veya `S` tuşu. Dil, sütun sayısı, monitör,

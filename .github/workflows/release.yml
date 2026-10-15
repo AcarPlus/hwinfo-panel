@@ -30,7 +30,7 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $v = ([regex]::Match((Get-Content version.py -Raw), '__version__\s*=\s*"([^"]+)"')).Groups[1].Value
+          $v = ([regex]::Match((Get-Content src/version.py -Raw), '__version__\s*=\s*"([^"]+)"')).Groups[1].Value
           "version=$v" >> $env:GITHUB_OUTPUT
 
       # Future code signing (removes the SmartScreen "unknown publisher" warning). Sign
@@ -49,7 +49,7 @@ jobs:
         with:
           name: HWiNFO-Panel-${{ steps.ver.outputs.version }}
           path: |
-            packaging/Output/HWiNFO-Panel-Setup-${{ steps.ver.outputs.version }}.exe
+            HWiNFO-Panel-Setup-${{ steps.ver.outputs.version }}.exe
             dist/HWiNFO-Panel-${{ steps.ver.outputs.version }}-portable.zip
 
       - name: Publish release assets
@@ -57,5 +57,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            packaging/Output/HWiNFO-Panel-Setup-${{ steps.ver.outputs.version }}.exe
+            HWiNFO-Panel-Setup-${{ steps.ver.outputs.version }}.exe
             dist/HWiNFO-Panel-${{ steps.ver.outputs.version }}-portable.zip

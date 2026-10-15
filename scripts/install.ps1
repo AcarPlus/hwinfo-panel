@@ -10,7 +10,7 @@
        so that the panel can start/stop HWiNFO and change its polling interval WITHOUT a UAC prompt each time.
        Without them the panel still works (read-only mode, HWiNFO must be started by you).
 
-    Run:  powershell -ExecutionPolicy Bypass -File install.ps1
+    Run:  powershell -ExecutionPolicy Bypass -File scripts\install.ps1
     Remove with uninstall.ps1.
 
 .PARAMETER HwinfoPath
@@ -27,7 +27,8 @@ param(
     [string]$TaskUser
 )
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
+$root = Split-Path $PSScriptRoot -Parent   # repo root
+$src = Join-Path $root 'src'
 $dataDirGiven = [bool]$DataDir
 if (-not $DataDir) {
     $DataDir = if ($env:HWINFO_PANEL_DIR) { $env:HWINFO_PANEL_DIR } else { Join-Path $env:LOCALAPPDATA 'HWiNFO Panel' }
@@ -104,8 +105,8 @@ if ($TasksOnly) {
 
         # The files the tasks run live in a folder only administrators can write (no privilege escalation).
         New-Item -ItemType Directory -Force -Path $taskDir | Out-Null
-        Copy-Item -LiteralPath (Join-Path $root 'set_interval.ps1') -Destination (Join-Path $taskDir 'set_interval.ps1') -Force
-        Copy-Item -LiteralPath (Join-Path $root 'hidden.vbs') -Destination (Join-Path $taskDir 'hidden.vbs') -Force
+        Copy-Item -LiteralPath (Join-Path $src 'set_interval.ps1') -Destination (Join-Path $taskDir 'set_interval.ps1') -Force
+        Copy-Item -LiteralPath (Join-Path $src 'hidden.vbs') -Destination (Join-Path $taskDir 'hidden.vbs') -Force
 
         $vbs = Join-Path $taskDir 'hidden.vbs'
         $valFile = Join-Path $DataDir 'hwinfo_interval.txt'
@@ -143,7 +144,7 @@ Write-Host "Python        : $($py.Exe) $($py.Pre -join ' ')"
 if (-not $dataDirGiven -and -not $env:HWINFO_PANEL_DIR) {
     $pyc = Join-Path (Split-Path $py.Exe) ((Split-Path $py.Exe -Leaf) -replace '^pythonw', 'python' -replace '^pyw', 'py')
     if (Test-Path -LiteralPath $pyc) {
-        $code = "import sys; sys.path.insert(0, r'$root'); import config; print(config.data_dir())"
+        $code = "import sys; sys.path.insert(0, r'$src'); import config; print(config.data_dir())"
         $real = (& $pyc @($py.Pre) -c $code 2>$null | Select-Object -Last 1)
         if ($real -and $real.Trim()) {
             $DataDir = $real.Trim()
@@ -159,9 +160,9 @@ $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\HWiNFO Pane
 $ws = New-Object -ComObject WScript.Shell
 $sc = $ws.CreateShortcut($lnk)
 $sc.TargetPath = $py.Exe
-$sc.Arguments = ((@($py.Pre) + @("`"$(Join-Path $root 'panel.py')`"")) -join ' ').Trim()
+$sc.Arguments = ((@($py.Pre) + @("`"$(Join-Path $src 'panel.py')`"")) -join ' ').Trim()
 $sc.WorkingDirectory = $root
-$sc.IconLocation = (Join-Path $root 'panel.ico') + ',0'
+$sc.IconLocation = (Join-Path $src 'panel.ico') + ',0'
 $sc.Description = 'HWiNFO Panel'
 $sc.Save()
 

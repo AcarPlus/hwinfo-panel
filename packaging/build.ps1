@@ -19,8 +19,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
-$version = ([regex]::Match((Get-Content -LiteralPath (Join-Path $root 'version.py') -Raw), '__version__\s*=\s*"([^"]+)"')).Groups[1].Value
-if (-not $version) { throw 'version.py: __version__ not found' }
+$version = ([regex]::Match((Get-Content -LiteralPath (Join-Path $root 'src\version.py') -Raw), '__version__\s*=\s*"([^"]+)"')).Groups[1].Value
+if (-not $version) { throw 'src\version.py: __version__ not found' }
 
 function Test-Py([string[]]$cmd) {
     try {
@@ -74,5 +74,7 @@ if ($Installer) {
     if (-not $iscc) { throw 'ISCC.exe (Inno Setup 6) not found. Install it from https://jrsoftware.org/isinfo.php' }
     & $iscc "/DAppVersion=$version" (Join-Path $PSScriptRoot 'setup.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compile failed' }
-    Write-Host "Setup       : $(Join-Path $PSScriptRoot "Output\HWiNFO-Panel-Setup-$version.exe")"
+    $setup = Join-Path $PSScriptRoot "Output\HWiNFO-Panel-Setup-$version.exe"
+    Copy-Item -LiteralPath $setup -Destination (Join-Path $root "HWiNFO-Panel-Setup-$version.exe") -Force
+    Write-Host "Setup       : $setup (copied to the repo root)"
 }
