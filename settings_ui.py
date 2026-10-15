@@ -16,6 +16,7 @@ import config
 import hwctl
 import i18n
 import layout
+import version
 from i18n import t
 
 ACCENT = "#58a6ff"
@@ -113,7 +114,7 @@ class SettingsWindow:
         self.win.title(t("st_title"))
         self.win.configure(bg=self.C["bg"])
         try:
-            self.win.iconbitmap(default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel.ico"))
+            self.win.iconbitmap(default=os.path.join(config.APP_DIR, "panel.ico"))
         except Exception:
             pass
         self.win.transient(self.root)
@@ -292,6 +293,8 @@ class SettingsWindow:
         self.button(bar, t("st_apply"), self.apply).pack(side="right")
         self.button(bar, t("st_cancel"), self.cancel).pack(side="right", padx=8)
         self.button(bar, t("st_save"), self.save, primary=True).pack(side="right")
+        tk.Label(bar, text=f"{config.APP_NAME} v{version.__version__}", bg=C["bg"], fg=C["faint"],
+                 font=(self.F_TXT, 8)).pack(side="left")
 
         self.initial = self.read_ui()
         self.nb.bind("<<NotebookTabChanged>>", lambda e: setattr(self, "tab_index", self.nb.index("current")))

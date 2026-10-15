@@ -1,13 +1,19 @@
 """User configuration (JSON in %LOCALAPPDATA%\\HWiNFO Panel) and monitor enumeration."""
 import copy
 import ctypes
+import glob
 import json
 import os
+import shutil
+import sys
 from ctypes import wintypes
 
 APP_NAME = "HWiNFO Panel"
 APP_ID = "HWiNFOPanel.App"
 HERE = os.path.dirname(os.path.abspath(__file__))
+FROZEN = bool(getattr(sys, "frozen", False))            # built with PyInstaller (packaging/build.ps1)
+# folder with the bundled resources (panel.ico, ...): PyInstaller's _internal folder, else the source folder
+APP_DIR = getattr(sys, "_MEIPASS", HERE) if FROZEN else HERE
 
 INTERVAL_MIN, INTERVAL_MAX = 0.5, 30.0
 SCALE_MIN, SCALE_MAX = 80, 150
@@ -64,7 +70,23 @@ def config_path():
     return os.path.join(data_dir(), "config.json")
 
 
+def shared_interval_file():
+    """The shared file in ProgramData (created by the Setup, writable by all users)."""
+    base = os.environ.get("ProgramData")
+    return os.path.join(base, APP_NAME, "hwinfo_interval.txt") if base else None
+
+
 def interval_file():
+    """File the SetInterval task reads. The installer build uses the shared ProgramData file (works even when the
+    installer ran as another account); otherwise (install.ps1, HWINFO_PANEL_DIR) the per-user data folder."""
+    if not os.environ.get("HWINFO_PANEL_DIR"):
+        p = shared_interval_file()
+        try:
+            if p and os.path.isfile(p):
+                open(p, "ab").close()                   # really writable for this user?
+                return p
+        except OSError:
+            pass
     return os.path.join(data_dir(), "hwinfo_interval.txt")
 
 
@@ -82,9 +104,30 @@ def _write(path, obj):
         f.write("\n")
 
 
+def _migrate_store_config(path):
+    """Frozen app, first run: take over config.json written by the Store-Python source version (its data
+    lived in the Python package folder). Only config.json is copied, never logs."""
+    if not FROZEN or os.environ.get("HWINFO_PANEL_DIR") or os.path.exists(path):
+        return
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        return
+    pat = os.path.join(glob.escape(base), "Packages", "PythonSoftwareFoundation.Python.3.*",
+                       "LocalCache", "Local", APP_NAME, "config.json")
+    old = [p for p in glob.glob(pat) if os.path.isfile(p)]
+    if not old:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        shutil.copyfile(max(old, key=os.path.getmtime), path)
+    except OSError:
+        pass
+
+
 def load_config():
     """Returns (cfg, note). Creates the file on first run; a broken file is backed up, never lost."""
     path = config_path()
+    _migrate_store_config(path)
     cfg = copy.deepcopy(DEFAULTS)
     note = None
     if not os.path.exists(path):

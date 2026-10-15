@@ -18,7 +18,7 @@ import layout
 import settings_ui
 from i18n import t
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = config.APP_DIR        # source folder, or the bundled resources when frozen (PyInstaller)
 ICO = os.path.join(HERE, "panel.ico")
 
 
@@ -138,6 +138,8 @@ def pick_font(*names):
 
 def launch_command():
     """Command line that starts this panel again (used by Windows when the taskbar button is pinned)."""
+    if config.FROZEN:
+        return f'"{sys.executable}"'
     exe = sys.executable
     w = os.path.join(os.path.dirname(exe), "pythonw.exe")
     if os.path.basename(exe).lower() == "python.exe" and os.path.isfile(w):

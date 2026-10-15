@@ -9,3 +9,7 @@ sensors.txt
 panel_eski.py
 panel_onceki.py
 *.bak
+build/
+dist/
+Output/
+*.spec.bak

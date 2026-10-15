@@ -38,10 +38,25 @@ Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
 - [HWiNFO64](https://www.hwinfo.com/download/) with **Settings > "Shared Memory Support" enabled**
   (in the Sensors window settings). The free version limits the shared memory to **12 hours** per start; with the
   installed tasks the panel restarts HWiNFO for you, otherwise restart it yourself.
-- Python 3.10+ with tkinter (python.org installer, or the Microsoft Store version). Check:
-  `python -c "import tkinter"`.
+- Only for running from source: Python 3.10+ with tkinter (python.org installer, or the Microsoft Store version). Check:
+  `python -c "import tkinter"`. The Setup / portable zip bundle their own Python.
 
 ## Install
+
+**Option 1 - Setup (recommended, no Python needed).** Download `HWiNFO-Panel-Setup-<version>.exe` from the
+[Releases](../../releases) page and run it. It installs to `%ProgramFiles%\HWiNFO Panel`, adds a Start Menu shortcut
+(optional desktop icon, optional "start with Windows") and, if HWiNFO64 is found, registers the three scheduled tasks
+`\HWiNFO Panel\Start`, `Stop`, `SetInterval` (needs administrator rights, asked once) so the panel can start / stop
+HWiNFO and change its polling interval without a UAC prompt each time. The interval file the tasks read lives in
+`%ProgramData%\HWiNFO Panel`. Without HWiNFO64 the panel still works in read-only mode (install HWiNFO and run the
+Setup again). English and Turkish wizard. Uninstall from *Settings > Apps*; it removes the tasks and the program folder
+and keeps your settings and logs in `%LOCALAPPDATA%\HWiNFO Panel`. An older `config.json` written by the Store-Python
+source version is taken over on first start.
+
+**Option 2 - portable zip.** Unzip `HWiNFO-Panel-<version>-portable.zip` anywhere and run `HWiNFO Panel.exe`
+(read-only mode, no tasks; set `HWINFO_PANEL_DIR` to keep the settings next to it).
+
+**Option 3 - from source** (Python 3.10+ with tkinter):
 
 1. Download / clone this folder anywhere (it is used in place, do not delete it afterwards).
 2. Enable *Shared Memory Support* in HWiNFO.
@@ -62,7 +77,21 @@ Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
 
 4. Start **HWiNFO Panel** from the Start Menu.
 
-Uninstall: `powershell -ExecutionPolicy Bypass -File uninstall.ps1` removes the tasks, the Program Files folder and the
+> **Unsigned builds:** the release files are not code-signed yet, so Windows SmartScreen may show "Windows protected
+> your PC / unknown publisher" (click *More info* > *Run anyway*), and **Smart App Control**, if enabled on your PC,
+> may block the unsigned `.exe` completely (running from source with Python is the alternative).
+
+**Build locally** (Python 3.10+ with tkinter; PyInstaller is installed into `build\venv` only):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1               # dist\HWiNFO Panel\HWiNFO Panel.exe
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip -Installer   # + portable zip and Setup (needs Inno Setup 6)
+```
+
+The Setup is described by `packaging\setup.iss` (output in `packaging\Output`); the version comes from `version.py`.
+Pushing a tag `v*` builds and publishes both files via GitHub Actions (`.github/workflows/release.yml`).
+
+Uninstall (source install): `powershell -ExecutionPolicy Bypass -File uninstall.ps1` removes the tasks, the Program Files folder and the
 shortcut and keeps your settings and logs; add `-Purge` to delete them as well.
 
 Security note: the tasks run only the two files in `%ProgramFiles%\HWiNFO Panel` (writable by administrators only).
@@ -77,7 +106,7 @@ Everything personal lives in `%LOCALAPPDATA%\HWiNFO Panel\` (created on first ru
 |---|---|
 | `config.json` | your settings and (optionally) your layout |
 | `logs\` | CSV recordings (default folder, see `log_dir`) |
-| `hwinfo_interval.txt` | interval handed to the `SetInterval` task |
+| `hwinfo_interval.txt` | interval handed to the `SetInterval` task (Setup installs use `%ProgramData%\HWiNFO Panel\hwinfo_interval.txt` instead) |
 | `panel.log` | traceback if the panel crashed at start |
 
 Set the environment variable `HWINFO_PANEL_DIR` to use another folder (portable use).
@@ -167,7 +196,7 @@ It has no network code and sends nothing anywhere.
 
 `hwsm.py` (shared memory reader), `layout.py` (rows, matching, auto-detection), `config.py` (settings, monitors),
 `hwctl.py` (HWiNFO detection and tasks), `i18n.py` (strings), `panel.py` (UI), `settings_ui.py` (settings window),
-`winicon.py` (taskbar identity),
+`winicon.py` (taskbar identity), `version.py`, `packaging/` (PyInstaller spec, Inno Setup script, build script),
 `make_icon.py` (regenerates `panel.ico`). License: MIT.
 
 ---
@@ -179,13 +208,21 @@ güç, sıcaklık, fan, ağ/disk ve PresentMon FPS; her satırda yeşilden kırm
 MİN / MAKS / ORT. İsterseniz değerleri CSV dosyasına kaydeder. HWiNFO / REALiX ile bağlantısı yoktur.
 
 **Gereksinimler:** Windows 10/11; HWiNFO64 (Ayarlar > **Shared Memory Support** açık; ücretsiz sürümde paylaşılan
-bellek her başlatmada **12 saat** ile sınırlıdır); Python 3.10+ (tkinter dahil).
+bellek her başlatmada **12 saat** ile sınırlıdır); Python 3.10+ (tkinter dahil; yalnızca kaynaktan çalıştırmak için).
 
-**Kurulum:** klasörü bir yere koyun, HWiNFO'da Shared Memory Support'u açın, bu klasörde
-`powershell -ExecutionPolicy Bypass -File install.ps1` çalıştırın. Başlat menüsüne "HWiNFO Panel" kısayolu eklenir ve
-(bir kez UAC onayıyla) HWiNFO'yu her seferinde UAC sormadan açıp kapatan 3 zamanlanmış görev kurulur
-(`-NoTasks` ile atlanır; görevler olmadan panel salt okunur çalışır). Kaldırma: `uninstall.ps1`
-(ayarlar ve kayıtlar kalır, silmek için `-Purge`).
+**Kurulum:** üç yol var. (1) **Önerilen:** [Releases](../../releases) sayfasından `HWiNFO-Panel-Setup-<sürüm>.exe`
+dosyasını indirip çalıştırın (Python gerekmez; Türkçe/İngilizce sihirbaz). `%ProgramFiles%\HWiNFO Panel` altına kurulur,
+Başlat menüsü kısayolu ekler (isteğe bağlı masaüstü simgesi ve "Windows ile başlat"); HWiNFO64 bulunursa (yönetici
+onayıyla, bir kez) HWiNFO'yu her seferinde UAC sormadan açıp kapatan 3 zamanlanmış görevi kurar. HWiNFO64 yoksa panel
+salt okunur çalışır (HWiNFO'yu kurup Setup'ı yeniden çalıştırın). Kaldırma: Ayarlar > Uygulamalar (ayarlar ve kayıtlar
+`%LOCALAPPDATA%\HWiNFO Panel` altında kalır). (2) **Taşınabilir zip:** açın, `HWiNFO Panel.exe` çalıştırın (görev yok,
+salt okunur). (3) **Kaynaktan:** klasörü bir yere koyun, HWiNFO'da Shared Memory Support'u açın, bu klasörde
+`powershell -ExecutionPolicy Bypass -File install.ps1` çalıştırın (`-NoTasks` ile görevler atlanır). Kaldırma:
+`uninstall.ps1` (ayarlar ve kayıtlar kalır, silmek için `-Purge`).
+**Uyarı:** sürümler henüz imzalı değildir; SmartScreen "bilinmeyen yayıncı" uyarısı gösterebilir ("Daha fazla bilgi" >
+"Yine de çalıştır"), **Akıllı Uygulama Denetimi** (Smart App Control) açıksa imzasız .exe'yi tamamen engelleyebilir
+(bu durumda kaynaktan çalıştırın). **Yerelde derleme:** `powershell -ExecutionPolicy Bypass -File packaging\build.ps1`
+(`-Zip -Installer` ile zip ve Setup; Inno Setup 6 gerekir).
 
 **Ayarlar:** `%LOCALAPPDATA%\HWiNFO Panel\config.json` ilk açılışta oluşur. `language` (`auto`/`tr`/`en`), `monitor`,
 `window_mode`, `interval`, `log_dir`, `manage_hwinfo` vb. yukarıdaki tabloda açıklanmıştır. Düzen varsayılan olarak
