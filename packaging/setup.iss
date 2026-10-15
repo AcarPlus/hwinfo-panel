@@ -41,19 +41,18 @@ Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
 
 [CustomMessages]
 en.AutoStart=Start HWiNFO Panel when I sign in to Windows
-en.AskInstallHwinfo=HWiNFO64 was not found on this PC.%n%nHWiNFO (free) gives HWiNFO Panel the most data: CPU / GPU temperatures, fans, voltages, FPS. Without it the panel uses its built-in data source (usage, clocks, RAM, network, disk, NVIDIA GPU; no CPU temperatures or fans).%n%nInstall HWiNFO64 now?
+en.InstallHwinfoTask=Also install HWiNFO64 (free, recommended: CPU / GPU temperatures, fans, FPS)
 en.InstallingHwinfo=Installing HWiNFO64 (winget)...
 en.HwinfoInstallFailed=HWiNFO64 could not be installed automatically. The download page will open; install it and run this Setup again so the panel can start / stop HWiNFO.
-en.AskEnableSM=HWiNFO64 is installed, but its "Shared Memory Support" is off, so HWiNFO Panel cannot read its sensors.%n%nTurn it on now? (If HWiNFO is running, restart it afterwards.)
 en.TasksFailed=The scheduled tasks for HWiNFO control could not be created. The panel still works in read-only mode.%n%nDetails: C:\ProgramData\HWiNFO Panel\install_tasks.log
 tr.AutoStart=Windows'ta oturum açtığımda HWiNFO Panel başlasın
-tr.AskInstallHwinfo=Bu bilgisayarda HWiNFO64 bulunamadı.%n%nHWiNFO (ücretsiz), HWiNFO Panel'e en fazla veriyi sağlar: CPU / GPU sıcaklıkları, fanlar, voltajlar, FPS. HWiNFO olmadan panel dahili veri kaynağını kullanır (kullanım, saat hızları, RAM, ağ, disk, NVIDIA GPU; CPU sıcaklığı ve fanlar olmaz).%n%nHWiNFO64 şimdi kurulsun mu?
+tr.InstallHwinfoTask=HWiNFO64'ü de kur (ücretsiz, önerilir: CPU / GPU sıcaklıkları, fanlar, FPS)
 tr.InstallingHwinfo=HWiNFO64 kuruluyor (winget)...
 tr.HwinfoInstallFailed=HWiNFO64 otomatik kurulamadı. İndirme sayfası açılacak; HWiNFO'yu kurup bu kurulumu yeniden çalıştırırsanız panel HWiNFO'yu açıp kapatabilir.
-tr.AskEnableSM=HWiNFO64 kurulu ama "Shared Memory Support" (paylaşılan bellek) ayarı kapalı, bu yüzden HWiNFO Panel sensörleri okuyamaz.%n%nŞimdi açılsın mı? (HWiNFO açıksa sonrasında yeniden başlatın.)
 tr.TasksFailed=HWiNFO denetimi için zamanlanmış görevler oluşturulamadı. Panel yine de salt okunur modda çalışır.%n%nAyrıntı: C:\ProgramData\HWiNFO Panel\install_tasks.log
 
 [Tasks]
+Name: "installhwinfo"; Description: "{cm:InstallHwinfoTask}"; Check: HwinfoMissing
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
@@ -145,22 +144,29 @@ begin
 end;
 
 // HWiNFO Panel reads HWiNFO's sensor shared memory: make sure it is enabled
-procedure EnsureSharedMemory(const exe: String; ask: Boolean);
+procedure EnsureSharedMemory(const exe: String; fresh: Boolean);
 var
   ini: String;
+  rc: Integer;
 begin
   ini := ExtractFilePath(exe) + 'HWiNFO64.INI';
   if GetIniString('Settings', 'SensorsSM', '0', ini) = '1' then
     Exit;
-  if ask and (SuppressibleMsgBox(CustomMessage('AskEnableSM'), mbConfirmation, MB_YESNO, IDYES) <> IDYES) then
-    Exit;
+  // HWiNFO rewrites its INI when it exits: close it politely first (the panel starts it again)
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/im HWiNFO64.EXE', '', SW_HIDE, ewWaitUntilTerminated, rc);
+  Sleep(3000);
   SetIniString('Settings', 'SensorsSM', '1', ini);
-  if not ask then
+  if fresh then
   begin
     // fresh HWiNFO install: start straight in sensors-only mode without the welcome dialog
     SetIniString('Settings', 'SensorsOnly', '1', ini);
     SetIniString('Settings', 'ShowWelcomeAndProgress', '0', ini);
   end;
+end;
+
+function HwinfoMissing(): Boolean;
+begin
+  Result := FindHwinfo() = '';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -171,21 +177,18 @@ begin
   if CurStep <> ssPostInstall then
     Exit;
   hw := FindHwinfo();
-  if hw = '' then
+  if (hw = '') and WizardIsTaskSelected('installhwinfo') then
   begin
-    if SuppressibleMsgBox(CustomMessage('AskInstallHwinfo'), mbConfirmation, MB_YESNO, IDYES) = IDYES then
+    if InstallHwinfoWinget() then
+      EnsureSharedMemory(FindHwinfo(), True)
+    else
     begin
-      if InstallHwinfoWinget() then
-        EnsureSharedMemory(FindHwinfo(), False)
-      else
-      begin
-        SuppressibleMsgBox(CustomMessage('HwinfoInstallFailed'), mbInformation, MB_OK, IDOK);
-        ShellExec('open', 'https://www.hwinfo.com/download/', '', '', SW_SHOWNORMAL, ewNoWait, rc);
-      end;
+      SuppressibleMsgBox(CustomMessage('HwinfoInstallFailed'), mbInformation, MB_OK, IDOK);
+      ShellExec('open', 'https://www.hwinfo.com/download/', '', '', SW_SHOWNORMAL, ewNoWait, rc);
     end;
   end
-  else
-    EnsureSharedMemory(hw, True);
+  else if hw <> '' then
+    EnsureSharedMemory(hw, False);
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\tasks\register_tasks.ps1') + '"' +
             ' -User "' + GetEnv('USERDOMAIN') + '\' + ExpandConstant('{username}') + '"' +
             ' -AppExe "' + ExpandConstant('{app}\{#AppExe}') + '"';

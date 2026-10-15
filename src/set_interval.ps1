@@ -25,6 +25,13 @@ else {
     $s = $lines.FindIndex([Predicate[string]]{ param($l) $l -match '^\[Settings\]' })
     if ($s -ge 0) { $lines.Insert($s + 1, "SensorInterval=$ms") } else { $lines.Add('[Settings]'); $lines.Add("SensorInterval=$ms") }
 }
+# the panel reads HWiNFO's shared memory: make sure it stays enabled
+$sm = $lines.FindIndex([Predicate[string]]{ param($l) $l -match '^SensorsSM=' })
+if ($sm -ge 0) { $lines[$sm] = 'SensorsSM=1' }
+else {
+    $s = $lines.FindIndex([Predicate[string]]{ param($l) $l -match '^\[Settings\]' })
+    if ($s -ge 0) { $lines.Insert($s + 1, 'SensorsSM=1') } else { $lines.Add('[Settings]'); $lines.Add('SensorsSM=1') }
+}
 Set-Content -LiteralPath $ini -Value $lines -Encoding Ascii
 
 Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe)

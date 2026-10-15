@@ -754,11 +754,12 @@ def main():
             # e.g. the 12 h limit of the free version: no connection for 20 s -> restart HWiNFO (at most every 5 min)
             t0 = st.get("down_since") or now
             st["down_since"] = t0
-            if now - t0 > 20 and now - st.get("last_restart", 0) > 300:
+            # shared memory switched off in HWiNFO: fix it after 5 s instead of waiting for the generic 20 s
+            wait = 5 if (st.get("hw_exe") and not hwctl.sm_enabled(st["hw_exe"])) else 20
+            if now - t0 > wait and now - st.get("last_restart", 0) > 300:
                 st["last_restart"] = now
-                if hwctl.proc_running():
-                    hwctl.run_task(hwctl.TASK_STOP)
-                    root.after(4000, lambda: hwctl.run_task(hwctl.TASK_START))
+                if st.get("hw_exe") and hwctl.tasks_installed():
+                    hwctl.repair_hwinfo(cfg["interval"], st["hw_exe"])   # restart + SensorsSM=1
                 else:
                     hwctl.run_task(hwctl.TASK_START)
         rows = layout.all_rows(st["sections"])

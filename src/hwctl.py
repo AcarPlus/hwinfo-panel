@@ -138,10 +138,31 @@ def hwinfo_interval_ms(exe):
     return 2000
 
 
+def sm_enabled(exe):
+    """True if HWiNFO64.INI has Shared Memory Support switched on."""
+    try:
+        ini = os.path.join(os.path.dirname(exe), "HWiNFO64.INI")
+        with open(ini, encoding="ascii", errors="ignore") as f:
+            return any(line.strip() == "SensorsSM=1" for line in f)
+    except Exception:
+        return False
+
+
+def repair_hwinfo(sec, exe):
+    """Restart HWiNFO through the SetInterval task, which also switches Shared Memory Support on."""
+    try:
+        os.makedirs(config.data_dir(), exist_ok=True)
+        with open(config.interval_file(), "w", encoding="ascii") as f:
+            f.write(str(int(round(sec * 1000))))
+    except Exception:
+        return False
+    return run_task(TASK_SETINT)
+
+
 def apply_hwinfo_interval(sec, exe):
     """Hand the logging interval to HWiNFO (task restarts HWiNFO). Returns ms if a change was started."""
     ms = int(round(sec * 1000))
-    if ms == hwinfo_interval_ms(exe):
+    if ms == hwinfo_interval_ms(exe) and sm_enabled(exe):
         return None
     try:
         os.makedirs(config.data_dir(), exist_ok=True)
