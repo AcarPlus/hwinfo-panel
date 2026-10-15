@@ -41,11 +41,17 @@ Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
 
 [CustomMessages]
 en.AutoStart=Start HWiNFO Panel when I sign in to Windows
+en.HwNoticeTitle=HWiNFO settings
+en.HwNoticeSub=HWiNFO Panel reads its data from HWiNFO64. The following HWiNFO settings will be changed.
+en.HwNoticeText=For HWiNFO Panel to work, Setup changes these HWiNFO64 settings (HWiNFO64.INI):%n%n  •  Shared Memory Support: on  (the panel reads the sensors from it)%n  •  Sensors-only mode: on%n  •  Start minimised to the tray (sensors window and main window): on%n  •  Closing the sensors window only minimises it: on%n  •  Welcome / progress dialogs at start: off%n%nHWiNFO then runs quietly in the background: the panel starts it when it opens and closes it when you close the panel. If HWiNFO is running now, Setup closes it politely first.%n%nAll other HWiNFO settings stay as they are. You can change these in HWiNFO at any time; the panel switches the ones it needs back on.
 en.InstallHwinfoTask=Also install HWiNFO64 (free, recommended: CPU / GPU temperatures, fans, FPS)
 en.InstallingHwinfo=Installing HWiNFO64 (winget)...
 en.HwinfoInstallFailed=HWiNFO64 could not be installed automatically. The download page will open; install it and run this Setup again so the panel can start / stop HWiNFO.
 en.TasksFailed=The scheduled tasks for HWiNFO control could not be created. The panel still works in read-only mode.%n%nDetails: C:\ProgramData\HWiNFO Panel\install_tasks.log
 tr.AutoStart=Windows'ta oturum açtığımda HWiNFO Panel başlasın
+tr.HwNoticeTitle=HWiNFO ayarları
+tr.HwNoticeSub=HWiNFO Panel verilerini HWiNFO64'ten okur. Aşağıdaki HWiNFO ayarları değiştirilecek.
+tr.HwNoticeText=HWiNFO Panel'in düzgün çalışması için kurulum, HWiNFO64'ün şu ayarlarını değiştirir (HWiNFO64.INI):%n%n  •  Paylaşılan bellek (Shared Memory Support): açık  (panel sensörleri buradan okur)%n  •  Yalnızca sensörler modu: açık%n  •  Açılışta sistem tepsisine küçültülmüş başla (sensör ve ana pencere): açık%n  •  Sensör penceresini kapatınca sadece simge durumuna küçült: açık%n  •  Açılıştaki karşılama / ilerleme pencereleri: kapalı%n%nBöylece HWiNFO arka planda sessizce çalışır: panel açılınca HWiNFO'yu başlatır, paneli kapatınca kapatır. HWiNFO şu an açıksa kurulum önce onu düzgünce kapatır.%n%nHWiNFO'nun diğer ayarlarına dokunulmaz. Bu ayarları HWiNFO'da istediğiniz zaman değiştirebilirsiniz; panel ihtiyaç duyduklarını yeniden açar.
 tr.InstallHwinfoTask=HWiNFO64'ü de kur (ücretsiz, önerilir: CPU / GPU sıcaklıkları, fanlar, FPS)
 tr.InstallingHwinfo=HWiNFO64 kuruluyor (winget)...
 tr.HwinfoInstallFailed=HWiNFO64 otomatik kurulamadı. İndirme sayfası açılacak; HWiNFO'yu kurup bu kurulumu yeniden çalıştırırsanız panel HWiNFO'yu açıp kapatabilir.
@@ -184,6 +190,24 @@ begin
   Sleep(3000);
   for i := 0 to HwKeyCount - 1 do
     SetIniString('Settings', HwKey(i), HwValue(i), ini);
+end;
+
+var
+  HwNoticePage: TOutputMsgWizardPage;
+
+procedure InitializeWizard();
+begin
+  // informational only (no question): shown after the tasks page
+  HwNoticePage := CreateOutputMsgPage(wpSelectTasks, CustomMessage('HwNoticeTitle'),
+    CustomMessage('HwNoticeSub'), CustomMessage('HwNoticeText'));
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  // nothing to tell when HWiNFO is neither installed nor going to be installed
+  if (HwNoticePage <> nil) and (PageID = HwNoticePage.ID) then
+    Result := (FindHwinfo() = '') and not WizardIsTaskSelected('installhwinfo');
 end;
 
 function HwinfoMissing(): Boolean;
