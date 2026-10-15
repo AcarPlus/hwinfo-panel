@@ -1,7 +1,8 @@
-"""Panel layout: config rows -> compiled rows, matching against HWiNFO readings, hardware auto-detection.
+"""Panel layout: config rows -> compiled rows, matching against sensor readings, hardware auto-detection.
 
-All matching uses the ORIGINAL (English) sensor / label names from HWiNFO shared memory, so a layout
-works the same on any Windows language. Patterns are case-insensitive regular expressions (re.search).
+All matching uses the ORIGINAL (English) sensor / label names (HWiNFO shared memory, LibreHardwareMonitor or the
+built-in source, see backend.py), so a layout works the same on any Windows language. Patterns are
+case-insensitive regular expressions (re.search). Label alternatives below: HWiNFO first, then LHM.
 """
 import re
 import sys
@@ -317,7 +318,7 @@ def _scaled(unit, lo, hi):
 
 
 def autodetect(rd):
-    """Default sections (config schema, current language) built from what HWiNFO reports. Missing rows are omitted."""
+    """Default sections (config schema, current language) built from the readings. Missing rows are omitted."""
     ix = _Index(rd)
     sections = []
 
@@ -349,24 +350,31 @@ def autodetect(rd):
                 break
             rows.append(_R(f"CPU {base} {t('clock')}", cpu, "^" + re.escape(base) + r"(?: T\d+)? Clock\b", 6,
                            "MHz", (1000, 6000)))
-        rows.append(_row_if(ix, t("cpu_usage"), cpu, r"^Total CPU Usage", 7, (0, 100)))
-        rows.append(_row_if(ix, t("cpu_maxthread"), cpu, r"^Max CPU/Thread Usage", 7, (0, 100)))
-    if gpu:
-        rows.append(_row_if(ix, t("gpu_clock"), gpu, r"^GPU Clock$", 6, (200, 3200)))
-        rows.append(_row_if(ix, t("gpu_load"), gpu, [r"^GPU Core Load", r"^GPU Utili[sz]ation", r"^GPU Load"], 7,
+        if not seen:      # LibreHardwareMonitor: "Core #1" (clock group)
+            for r in ix.readings(cpu, r"^Core #\d+$", 6)[:MAX_CORE_ROWS]:
+                n = r["label"].split("#")[1]
+                rows.append(_R(f"CPU Core {n} {t('clock')}", cpu, "^Core #" + n + "$", 6, "MHz", (1000, 6000)))
+        rows.append(_row_if(ix, t("cpu_usage"), cpu, [r"^Total CPU Usage", r"^CPU Total$"], 7, (0, 100)))
+        rows.append(_row_if(ix, t("cpu_maxthread"), cpu, [r"^Max CPU/Thread Usage", r"^CPU Core Max$"], 7,
                             (0, 100)))
-        lp, used = ix.first(gpu, [r"^GPU D3D Memory Dedicated$", r"^GPU Memory Allocated$"], 8)
+    if gpu:
+        rows.append(_row_if(ix, t("gpu_clock"), gpu, [r"^GPU Clock$", r"^GPU Core$"], 6, (200, 3200)))
+        rows.append(_row_if(ix, t("gpu_load"), gpu, [r"^GPU Core Load", r"^GPU Utili[sz]ation", r"^GPU Load",
+                                                     r"^GPU Core$"], 7, (0, 100)))
+        lp, used = ix.first(gpu, [r"^GPU D3D Memory Dedicated$", r"^GPU Memory Allocated$", r"^GPU Memory Used$"], 8)
         if lp:
-            _, alloc = ix.first(gpu, r"^GPU Memory Allocated$", 8)
-            _, avail = ix.first(gpu, r"^GPU Memory Available$", 8)
-            total = round((alloc["value"] + avail["value"]) / 1024) * 1024 if alloc and avail else 0
+            _, alloc = ix.first(gpu, [r"^GPU Memory Allocated$", r"^GPU Memory Used$"], 8)
+            _, avail = ix.first(gpu, [r"^GPU Memory Available$", r"^GPU Memory Free$"], 8)
+            _, tot = ix.first(gpu, r"^GPU Memory Total$", 8)
+            total = tot["value"] if tot else (alloc["value"] + avail["value"] if alloc and avail else 0)
+            total = round(total / 1024) * 1024
             if total < 1024:
                 total = 8192
             rows.append(_R(t("vram"), gpu, lp, 8, "MB", (0, total)))
     sysre = r"^System:"
-    lp, used = ix.first(sysre, r"^Physical Memory Used$", 8)
+    lp, used = ix.first(sysre, [r"^Physical Memory Used$", r"^Memory Used$"], 8)
     if lp:
-        _, avail = ix.first(sysre, r"^Physical Memory Available$", 8)
+        _, avail = ix.first(sysre, [r"^Physical Memory Available$", r"^Memory Available$"], 8)
         total = round((used["value"] + (avail["value"] if avail else 0)) / 1024) * 1024
         rows.append(_R(t("ram"), sysre, lp, 8, "MB", (0, total if total >= 2048 else 16384)))
     add("sec_clock", "gauge", rows)
@@ -376,14 +384,17 @@ def autodetect(rd):
     if cpus:
         rows.append(_row_if(ix, t("cpu_pkg_power"), cpu,
                             [r"^CPU Package Power$", r"^CPU Total Power", r"^Total CPU Power", r"^CPU Package Power",
-                             r"^CPU (?!.*SVI3)(?!PPT)(?!Core)(?!SoC).*Power", r"^CPU PPT$"], 5, (10, 150)))
-        rows.append(_row_if(ix, t("cpu_core_power"), cpu, [r"^CPU Core Power", r"^IA Cores Power"], 5, (5, 120)))
+                             r"^CPU (?!.*SVI3)(?!PPT)(?!Core)(?!SoC).*Power", r"^CPU PPT$", r"^Package$",
+                             r"^CPU Package$"], 5, (10, 150)))
+        rows.append(_row_if(ix, t("cpu_core_power"), cpu, [r"^CPU Core Power", r"^IA Cores Power", r"^CPU Cores$"],
+                            5, (5, 120)))
         rows.append(_row_if(ix, t("cpu_soc_power"), cpu, r"^CPU SoC Power", 5, (5, 30)))
-        rows.append(_row_if(ix, t("cpu_core_volt"), cpu, r"^CPU VDDCR_VDD Voltage", 2, (0.7, 1.5)))
+        rows.append(_row_if(ix, t("cpu_core_volt"), cpu, [r"^CPU VDDCR_VDD Voltage", r"^Core \(SVI\d TFN\)$",
+                                                          r"^CPU Core$"], 2, (0.7, 1.5)))
     if gpu:
-        rows.append(_row_if(ix, t("gpu_power"), gpu, [r"^GPU Power$", r"^GPU (?:ASIC|Chip) Power", r"^GPU Power"],
-                            5, (20, 300)))
-        rows.append(_row_if(ix, t("gpu_volt"), gpu, r"^GPU Core Voltage$", 2, (0.7, 1.2)))
+        rows.append(_row_if(ix, t("gpu_power"), gpu, [r"^GPU Power$", r"^GPU (?:ASIC|Chip) Power", r"^GPU Power",
+                                                      r"^GPU Package$"], 5, (20, 300)))
+        rows.append(_row_if(ix, t("gpu_volt"), gpu, [r"^GPU Core Voltage$", r"^GPU Core$"], 2, (0.7, 1.2)))
     # de-duplicate (the same reading must not appear twice)
     seen_lbl, uniq = set(), []
     for r in rows:
@@ -396,12 +407,14 @@ def autodetect(rd):
     rows = []
     if cpus:
         rows.append(_row_if(ix, t("cpu_temp"), cpu,
-                            [r"^CPU \(Tctl/Tdie\)", r"^CPU \(Tdie\)", r"^CPU Package$"], 1, (35, 95)))
-        for r in ix.readings(cpu, r"^CPU CCD(\d+) \(Tdie\)", 1):
+                            [r"^CPU \(Tctl/Tdie\)", r"^CPU \(Tdie\)", r"^CPU Package$", r"^Core \(Tctl/Tdie\)$",
+                             r"^Core \(Tdie\)$", r"^Core \(Tctl\)$"], 1, (35, 95)))
+        ccd_pfx = "CPU CCD" if ix.readings(cpu, r"^CPU CCD\d+ \(Tdie\)", 1) else "CCD"    # HWiNFO / LHM
+        for r in ix.readings(cpu, "^" + ccd_pfx + r"(\d+) \(Tdie\)", 1):
             n = re.search(r"CCD(\d+)", r["label"]).group(1)
-            rows.append(_R(t("cpu_ccd", n=n), cpu, r"^CPU CCD" + n + r" \(Tdie\)", 1, None, (30, 95)))
+            rows.append(_R(t("cpu_ccd", n=n), cpu, "^" + ccd_pfx + n + r" \(Tdie\)", 1, None, (30, 95)))
         rows.append(_row_if(ix, t("cpu_iod"), cpu, r"^CPU IOD Hotspot", 1, (35, 90)))
-        rows.append(_row_if(ix, t("cpu_core_max"), cpu, r"^Core Max$", 1, (35, 95)))
+        rows.append(_row_if(ix, t("cpu_core_max"), cpu, [r"^Core Max$", r"^CCDs Max \(Tdie\)$"], 1, (35, 95)))
     mbs = [s for s in ix.sensors if not _NON_MB.search(s)]
     for s in mbs:
         sre = "^" + re.escape(s) + "$"
@@ -413,13 +426,16 @@ def autodetect(rd):
             lim = (30, 105) if re.search(r"VRM|MOS", lbl, re.I) else (30, 90)
             rows.append(_R(lbl if re.match(r"(?i)motherboard|mainboard", lbl) else t("mb", n=lbl), sre, "^" + re.escape(lbl) + "$", 1, None, lim))
     if gpu:
-        rows.append(_row_if(ix, t("gpu_temp"), gpu, r"^GPU Temperature", 1, (30, 88)))
-        rows.append(_row_if(ix, t("gpu_hot"), gpu, r"^GPU Hot ?Spot Temperature", 1, (35, 100)))
+        rows.append(_row_if(ix, t("gpu_temp"), gpu, [r"^GPU Temperature", r"^GPU Core$"], 1, (30, 88)))
+        rows.append(_row_if(ix, t("gpu_hot"), gpu, [r"^GPU Hot ?Spot Temperature", r"^GPU Hot ?Spot$"], 1,
+                            (35, 100)))
         rows.append(_row_if(ix, t("gpu_memtemp"), gpu, [r"^GPU Memory Junction Temperature",
-                                                        r"^GPU Memory Temperature"], 1, (40, 105)))
+                                                        r"^GPU Memory Temperature", r"^GPU Memory Junction$",
+                                                        r"^GPU Memory$"], 1, (40, 105)))
     for s in ix.sensors_like(r"^S\.M\.A\.R\.T\.:")[:4]:
         sre = "^" + re.escape(s) + "$"
-        lp, _ = ix.first(sre, [r"^Drive Temperature$", r"^Drive Temperature"], 1)
+        lp, _ = ix.first(sre, [r"^Drive Temperature$", r"^Drive Temperature", r"^Composite Temperature$",
+                               r"^Temperature$", r"^Temperature #?1$"], 1)
         if lp:
             model = re.sub(r"^S\.M\.A\.R\.T\.:\s*", "", s)
             model = re.sub(r"\s*\[[^\]]*\]\s*$", "", model)
@@ -432,6 +448,11 @@ def autodetect(rd):
             m = re.search(r"CHANNEL (\w+)/DIMM (\d+)", s, re.I)
             n = (m.group(1) + m.group(2)) if m else re.search(r"\[#(\d+)\]", s).group(1) if "[#" in s else "?"
             rows.append(_R(t("dimm", n=n), sre, lp, 1, None, (30, 85)))
+    for i, s in enumerate(ix.sensors_like(r"^DIMM: ")[:4]):       # LibreHardwareMonitor
+        sre = "^" + re.escape(s) + "$"
+        r = next(iter(ix.readings(sre, rtype=1)), None)
+        if r:
+            rows.append(_R(t("dimm", n=i + 1), sre, "^" + re.escape(r["label"]) + "$", 1, None, (30, 85)))
     add("sec_temp", "temp", rows)
 
     # ---------------- fans
@@ -445,6 +466,10 @@ def autodetect(rd):
         r = next(iter(ix.readings(gpu, r"^GPU Fan", 3)), None)
         if r:      # GPU fans legitimately stop at idle: keep the row
             rows.append(_R(t("gpu_fan"), gpu, "^" + re.escape(r["label"]) + "$", 3, "RPM", (0, 3300)))
+        else:      # only a duty cycle (built-in source with an NVML that has no RPM)
+            r = next(iter(ix.readings(gpu, r"^GPU Fan\d* Speed$", 7)), None)
+            if r:
+                rows.append(_R(t("gpu_fan"), gpu, "^" + re.escape(r["label"]) + "$", 7, "%", (0, 100)))
     add("sec_fan", "fan", rows)
 
     # ---------------- network / disk
@@ -454,14 +479,17 @@ def autodetect(rd):
         good = [s for s in nets if not _VIRTUAL.search(s)] or nets
 
         def traffic(s):
-            return sum(r["value"] for r in ix.readings("^" + re.escape(s) + "$", r"^Total (DL|UP)")) + \
-                   sum(r["value"] for r in ix.readings("^" + re.escape(s) + "$", r"^Current (DL|UP) rate"))
+            sr = "^" + re.escape(s) + "$"
+            return sum(r["value"] for r in ix.readings(sr, r"^Total (DL|UP)|^Data (Up|Down)loaded$")) + \
+                sum(r["value"] for r in ix.readings(sr, r"^Current (DL|UP) rate|^(Up|Down)load Speed$"))
         best = max(good, key=lambda s: (traffic(s), -good.index(s)))
         sre = "^" + re.escape(best) + "$"
-        lp, r = ix.first(sre, r"^Current DL rate", 8)
+        lp, r = ix.first(sre, [r"^Current DL rate", r"^Download Speed$"], 8)
         unit = r["unit"] if r else "KB/s"
-        rows.append(_row_if(ix, t("download"), sre, r"^Current DL rate", 8, _scaled(unit, 0, 100000)))
-        rows.append(_row_if(ix, t("upload"), sre, r"^Current UP rate", 8, _scaled(unit, 0, 50000)))
+        rows.append(_row_if(ix, t("download"), sre, [r"^Current DL rate", r"^Download Speed$"], 8,
+                            _scaled(unit, 0, 100000)))
+        rows.append(_row_if(ix, t("upload"), sre, [r"^Current UP rate", r"^Upload Speed$"], 8,
+                            _scaled(unit, 0, 50000)))
     drives = ix.sensors_like(r"^Drive:")
     if drives:
         d = next((s for s in drives if re.search(r"\[C:\]", s)), drives[0])

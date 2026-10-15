@@ -1,4 +1,4 @@
-"""HWiNFO Panel: a tkinter dashboard for the HWiNFO64 sensor shared memory (see README.md)."""
+"""HWiNFO Panel: a tkinter sensor dashboard (HWiNFO64, LibreHardwareMonitor or built-in Windows sensors, see README)."""
 import copy
 import csv
 import math
@@ -10,9 +10,9 @@ import tkinter.font as tkfont
 import traceback
 import types
 
+import backend
 import config
 import hwctl
-import hwsm
 import i18n
 import layout
 import settings_ui
@@ -190,11 +190,21 @@ def main():
           "hw_exe": hwctl.detect_hwinfo(cfg["hwinfo_path"]), "tasks": hwctl.tasks_installed(),
           "mon": config.pick_monitor(cfg["monitor"]), "mode": str(cfg["window_mode"]).lower()}
 
+    def hwinfo_managed():
+        """The panel starts / stops HWiNFO itself (option on, install.ps1 tasks present, HWiNFO installed)."""
+        return bool(cfg["manage_hwinfo"]) and st["tasks"] and os.path.isfile(st["hw_exe"] or "")
+
+    src = backend.Manager(cfg, hwinfo_managed)
+    st["gen"] = src.gen
+
+    def hw_active():
+        return src.active == "hwinfo"
+
     def manage_on():
-        return bool(cfg["manage_hwinfo"]) and st["tasks"]
+        return bool(cfg["manage_hwinfo"]) and st["tasks"] and hw_active()
 
     def sync_on():
-        return bool(cfg["sync_hwinfo_interval"]) and st["tasks"]
+        return bool(cfg["sync_hwinfo_interval"]) and st["tasks"] and hw_active()
 
     def place(final=False):
         """Put the window on the chosen monitor, then maximise / full-screen it."""
@@ -218,13 +228,6 @@ def main():
 
     place()
 
-    explicit = cfg["sections"] if isinstance(cfg["sections"], list) else None
-    if explicit is not None:
-        st["sections_cfg"] = explicit
-        st["sections"] = layout.build_sections(explicit)
-        st["auto"] = not layout.build_sections(explicit, include_hidden=True)
-        st["checked"] = st["auto"]
-
     spin = tk.Spinbox(root, from_=config.INTERVAL_MIN, to=config.INTERVAL_MAX, increment=0.5, format="%.1f",
                       width=5, bg=C["track"], fg=C["fg"], insertbackground=C["fg"], buttonbackground=C["track"],
                       justify="center", relief="flat", highlightthickness=0, bd=0)
@@ -235,10 +238,24 @@ def main():
         """Why there is no data (empty when everything is fine)."""
         if st["ok"]:
             return ""
+        if src.active == "lhm":
+            return t("hint_lhm")
+        if not hw_active():
+            return ""
         h = t("hint_no_shm") if hwctl.proc_running() else t("hint_not_running")
         if not st["tasks"]:
             h += " · " + t("hint_readonly")
         return h
+
+    def conn_text():
+        if src.active == "lhm":
+            return t("conn_lhm_wmi") if src.via() == "wmi" else t("conn_lhm")
+        if src.active == "builtin":
+            return t("conn_builtin") + " (" + t("conn_builtin_short") + ")"
+        return t("conn_ok")
+
+    def wait_text():
+        return t("conn_wait_lhm") if src.active == "lhm" else t("conn_wait")
 
     # ------------------------------------------------------------ drawing
     def meas_font(family, size, weight="normal"):
@@ -437,9 +454,9 @@ def main():
         cv.itemconfig(s["sw_l"], fill=C["faint"] if all_ else C["fg"])
         cv.itemconfig(s["sw_r"], fill=C["fg"] if all_ else C["faint"])
         hint = current_hint()
-        conn = t("conn_ok") if st["ok"] else (hint or t("conn_wait"))
+        conn = conn_text() if st["ok"] else (hint or wait_text())
         if st.get("frozen") and st["items"]:
-            conn = t("frozen") + (" · " + hint if hint else "")
+            conn = t("frozen", src=backend.display_name(src.active)) + (" · " + hint if hint else "")
         ap = st.get("applying")
         if ap and time.time() - ap[0] < 12:
             conn = t("applying", ms=ap[1])
@@ -548,6 +565,33 @@ def main():
         st["sections_cfg"] = cfg_list
         st["sections"] = layout.build_sections(cfg_list)
 
+    def load_layout():
+        """The layout configured for the active data source, or auto-detection."""
+        lay = cfg.get(config.layout_key(src.active), "auto")
+        explicit = lay if isinstance(lay, list) else None
+        if explicit is not None and layout.build_sections(explicit, include_hidden=True):
+            st["auto"], st["checked"] = False, False
+            set_layout_cfg(explicit)
+        else:
+            st["auto"], st["checked"] = True, True
+            set_layout_cfg([])
+        st["auto_n"] = -1
+
+    load_layout()
+
+    def source_changed():
+        """Another data source is active: switch to its layout, new statistics, new CSV file."""
+        st["gen"] = src.gen
+        load_layout()
+        st["was_down"] = False
+        st["warm_until"] = 0
+        stats.clear()
+        logger.close()
+        if hw_active():
+            st["hw_used"] = True
+        if st["size"]:
+            build(*st["size"])
+
     def ensure_layout(rd):
         """Explicit layout: if none of its rows exists on this PC, fall back to auto-detection.
         Auto layout: (re)detect whenever the set of readings changes in size."""
@@ -574,9 +618,12 @@ def main():
     # ------------------------------------------------------------ settings window
     def read_now():
         try:
-            return hwsm.read_all()
+            rd = src.read_all()
         except Exception:
             return []
+        if src.gen != st["gen"]:
+            source_changed()
+        return rd
 
     def layout_snapshot():
         """(is_auto, deep copy of the effective layout in config form incl. hidden rows)."""
@@ -612,25 +659,32 @@ def main():
                 rd = read_now()
                 if rd:
                     ensure_layout(rd)
+        lay_key = config.layout_key(src.active)          # the layout tab edits the active source's layout
         if lay_mode == "auto":
-            cfg["sections"] = "auto"
-            keys.append("sections")
+            cfg[lay_key] = "auto"
+            keys.append(lay_key)
             st["auto"], st["checked"], st["auto_n"] = True, True, -1
             set_layout_cfg([])
             logger.close()
             need_build = True
             ensure_layout(read_now())
         elif lay_mode == "explicit":
-            cfg["sections"] = copy.deepcopy(lay_cfg or [])
-            keys.append("sections")
+            cfg[lay_key] = copy.deepcopy(lay_cfg or [])
+            keys.append(lay_key)
             st["auto"], st["checked"] = False, True
-            set_layout_cfg(cfg["sections"])
+            set_layout_cfg(cfg[lay_key])
             logger.close()
             need_build = True
         if "topmost" in real:
             root.attributes("-topmost", bool(cfg["topmost"]))
         if "hwinfo_path" in real:
             st["hw_exe"] = hwctl.detect_hwinfo(cfg["hwinfo_path"])
+        if {"backend", "lhm_url", "presentmon_path"} & set(real):
+            if src.reconfigure():
+                source_changed()
+                if manage_on() and not hwctl.proc_running():
+                    hwctl.run_task(hwctl.TASK_START)
+                    st["last_restart"] = time.time()
         if {"log_dir", "csv_delimiter", "csv_decimal", "log_all", "logging"} & set(real):
             if "logging" in real and cfg["logging"]:
                 stats.clear()
@@ -639,7 +693,7 @@ def main():
             logger.last = 0
         if "log_all" in real and st["status"]:
             animate_knob(st["status"]["sw_geo"][1] if cfg["log_all"] else st["status"]["sw_geo"][0])
-        if "interval" in real or ("sync_hwinfo_interval" in real and cfg["sync_hwinfo_interval"]):
+        if "interval" in real or ("sync_hwinfo_interval" in real and cfg["sync_hwinfo_interval"]) or                 ("backend" in real and sync_on()):
             spin.delete(0, "end")
             spin.insert(0, f"{cfg['interval']:.1f}")
             set_interval()
@@ -655,7 +709,7 @@ def main():
 
     api = types.SimpleNamespace(root=root, cfg=cfg, C=C, fonts=(F_TXT, F_HEAD, F_NUM), apply=apply_settings, layout=layout_snapshot, readings=read_now,
                                 monitor=panel_monitor, refresh_tasks=refresh_tasks,
-                                detect=hwctl.detect_hwinfo, monitors=config.monitors)
+                                detect=hwctl.detect_hwinfo, monitors=config.monitors, source=src)
 
     def open_settings(e=None):
         w = st["settings"]
@@ -675,18 +729,21 @@ def main():
     # ------------------------------------------------------------ data
     def tick():
         try:
-            rd = hwsm.read_all()
+            rd = src.read_all()
             ok = True
         except Exception:
             rd, ok = [], False
+        if src.gen != st["gen"]:
+            source_changed()
         st["ok"] = ok
         now = time.time()
         if ok:
             ensure_layout(rd)
         if ok and st.get("was_down"):
-            # HWiNFO just started: first readings may be missing / zero; hold the old values for a few rounds
+            # HWiNFO / LHM just started: first readings may be missing / zero; hold the old values a few rounds
             st["was_down"] = False
-            st["warm_until"] = now + max(3.0, 2.5 * hwctl.hwinfo_interval_ms(st["hw_exe"]) / 1000)
+            ms = hwctl.hwinfo_interval_ms(st["hw_exe"]) if hw_active() else 1000
+            st["warm_until"] = now + max(3.0, 2.5 * ms / 1000)
         if not ok:
             st["was_down"] = True
         frozen = (not ok) or now < st.get("warm_until", 0)
@@ -745,12 +802,14 @@ def main():
 
     def on_close():
         logger.close()
-        if manage_on():
+        src.close()
+        if bool(cfg["manage_hwinfo"]) and st["tasks"] and (hw_active() or st.get("hw_used")):
             hwctl.run_task(hwctl.TASK_STOP)
         root.destroy()
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     st["last_restart"] = time.time()
+    st["hw_used"] = hw_active()
     if sync_on() and hwctl.apply_hwinfo_interval(cfg["interval"], st["hw_exe"]):
         pass                                          # the task adjusted the interval and (re)started HWiNFO
     elif manage_on() and not hwctl.proc_running():

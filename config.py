@@ -19,6 +19,7 @@ INTERVAL_MIN, INTERVAL_MAX = 0.5, 30.0
 SCALE_MIN, SCALE_MAX = 80, 150
 
 DEFAULTS = {
+    "backend": "auto",               # "auto" | "hwinfo" | "lhm" | "builtin" (sensor data source, see README)
     "language": "auto",              # "auto" (Windows UI language) | "tr" | "en"
     "monitor": "auto",               # "auto" | monitor index (see tools/list_monitors.py)
     "window_mode": "maximized",      # "maximized" | "fullscreen" | "window"
@@ -27,14 +28,17 @@ DEFAULTS = {
     "topmost": True,
     "interval": 5.0,                 # CSV logging interval, seconds (0.5 - 30)
     "logging": False,                # CSV logging on/off
-    "log_all": False,                # False: only the rows shown, True: every HWiNFO sensor
+    "log_all": False,                # False: only the rows shown, True: every sensor reading
     "log_dir": "",                   # "" = %LOCALAPPDATA%\HWiNFO Panel\logs
     "csv_delimiter": "auto",         # "auto" (Windows list separator) or e.g. ";" / ","
     "csv_decimal": "auto",           # "auto" (Windows decimal symbol) or "," / "."
     "sync_hwinfo_interval": True,    # write the logging interval to HWiNFO's SensorInterval (needs install.ps1)
     "manage_hwinfo": True,           # start HWiNFO with the panel, stop it on close (needs install.ps1)
     "hwinfo_path": "auto",           # "auto" or full path of HWiNFO64.EXE
+    "lhm_url": "auto",               # LibreHardwareMonitor web server; "auto" = http://127.0.0.1:8085/data.json
+    "presentmon_path": "",           # optional: PresentMon console exe for FPS with the lhm / builtin source
     "sections": "auto",              # "auto" (detected from your hardware) or a list, see README
+                                     # (the lhm / builtin sources use "sections_lhm" / "sections_builtin")
 }
 
 
@@ -152,6 +156,7 @@ def load_config():
     cfg["interval"] = clamp_interval(cfg.get("interval"))
     cfg["columns"] = norm_columns(cfg.get("columns"))
     cfg["ui_scale"] = clamp_scale(cfg.get("ui_scale"))
+    cfg["backend"] = norm_backend(cfg.get("backend"))
     return cfg, note
 
 
@@ -172,6 +177,17 @@ def norm_columns(v):
     except (TypeError, ValueError):
         pass
     return "auto"
+
+
+def layout_key(source):
+    """Config key of the layout of a data source: "sections" (HWiNFO), "sections_lhm", "sections_builtin".
+    The sources name their sensors differently, so each one keeps its own layout."""
+    return "sections" if source in (None, "", "hwinfo") else "sections_" + str(source)
+
+
+def norm_backend(v):
+    v = str(v or "auto").strip().lower()
+    return v if v in ("auto", "hwinfo", "lhm", "builtin") else "auto"
 
 
 def clamp_scale(v):

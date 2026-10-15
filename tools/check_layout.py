@@ -1,6 +1,7 @@
 """Headless check: does every row of your layout (config.json and the auto-detected one) find a reading?
 
-    python tools/check_layout.py                     # uses the running HWiNFO
+    python tools/check_layout.py                     # uses the data source set in config.json ("backend")
+    python tools/check_layout.py --backend builtin   # or hwinfo / lhm / auto
     python tools/check_layout.py --readings x.json   # JSON list of reading dicts instead (testing)
 
 Prints only row names and counts (no values).
@@ -10,8 +11,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import backend  # noqa: E402
 import config  # noqa: E402
-import hwsm  # noqa: E402
 import i18n  # noqa: E402
 import layout  # noqa: E402
 
@@ -33,16 +34,19 @@ def main():
     if "--readings" in sys.argv:
         with open(sys.argv[sys.argv.index("--readings") + 1], encoding="utf-8") as f:
             rd = json.load(f)
+        name = backend.cli_backend(sys.argv) or "hwinfo"
     else:
         try:
-            rd = hwsm.read_all()
+            name, rd = backend.read_once(cfg, backend.cli_backend(sys.argv))
+            print("data source:", name)
         except Exception as ex:
-            print("Cannot read HWiNFO shared memory:", ex)
+            print("Cannot read sensor data:", ex)
             return 1
     print(f"{len(rd)} readings")
     bad = 0
-    if isinstance(cfg["sections"], list):
-        bad += report("config.json layout", layout.build_sections(cfg["sections"]), rd)
+    key = config.layout_key(name)
+    if isinstance(cfg.get(key), list):
+        bad += report(f"config.json layout ({key})", layout.build_sections(cfg[key]), rd)
     else:
         print("config.json layout: auto")
     auto = layout.build_sections(layout.autodetect(rd))

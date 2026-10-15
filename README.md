@@ -1,12 +1,17 @@
 # HWiNFO Panel
 
-A compact always-on-top dashboard for Windows that shows live data from [HWiNFO](https://www.hwinfo.com/):
-clocks, usage, power, temperatures, fans, network/disk throughput and PresentMon FPS, each with a colour
-gradient (green to red), a bar, and panel-side MIN / MAX / AVG. It can also record the values to CSV files.
-Made for a small secondary or portrait monitor, but it runs happily on any screen (window, maximized or full screen).
+A compact always-on-top dashboard for Windows that shows live sensor data: clocks, usage, power, temperatures, fans,
+network/disk throughput and FPS, each with a colour gradient (green to red), a bar, and panel-side MIN / MAX / AVG.
+It can also record the values to CSV files. Made for a small secondary or portrait monitor, but it runs happily on any
+screen (window, maximized or full screen).
 
-> Not affiliated with, endorsed by, or sponsored by HWiNFO / REALiX s.r.o. HWiNFO is a trademark of its owner.
-> This project only *reads* the sensor data that HWiNFO publishes through its documented shared memory interface.
+The data comes from one of three sources: [HWiNFO](https://www.hwinfo.com/) (widest coverage),
+[LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) (open source), or the
+**built-in** Windows sources (nothing to install, but no CPU temperatures / fans). See [Data sources](#data-sources).
+
+> Not affiliated with, endorsed by, or sponsored by HWiNFO / REALiX s.r.o. or the LibreHardwareMonitor project.
+> HWiNFO is a trademark of its owner. This project only *reads* the sensor data that HWiNFO publishes through its
+> documented shared memory interface (or that LibreHardwareMonitor publishes through its local web server).
 
 Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
 
@@ -16,8 +21,8 @@ Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
   usage / power / temperatures, GPU NVIDIA / AMD / Intel, RAM / VRAM, motherboard VRM / PCH temps, all motherboard
   fans, drive temperatures, network of the busiest adapter, disk read/write, PresentMon FPS). Rows that do not exist
   on your PC are simply left out.
-- Fully **configurable** (`config.json`): sections, rows, regex matching on HWiNFO's *original English* names,
-  number formats, units, colour limits, bars.
+- Fully **configurable** (`config.json`): sections, rows, regex matching on the *original English* sensor names,
+  number formats, units, colour limits, bars. Each data source keeps its own layout.
 - 256-step green to red colour gradient per row from its limits (reversed limits for FPS: low = red).
 - **CSV logging**: every on/off session writes a new file; "required rows" or "all sensors" (slide switch);
   interval 0.5 to 30 s (spin box in the panel). Press `L` to toggle recording, `S` for settings, `F11` for full screen.
@@ -26,20 +31,66 @@ Türkçe açıklama için aşağıya bakın: [Türkçe](#türkçe).
   more than 20 s (the free HWiNFO version stops its sensors after 12 hours). Without this the panel runs in read-only
   mode and shows a hint when HWiNFO is not running.
 - **Settings window** (gear button next to the interval box, or press `S`): language, columns, monitor, window mode,
-  always on top, row / font scale, logging, CSV format, HWiNFO options, and the layout itself (show / hide rows, names,
-  colour limits, bars, section titles / colours / order, "Add sensor" from the live HWiNFO list). Changes apply live.
+  always on top, row / font scale, logging, CSV format, data source and HWiNFO options, and the layout itself (show /
+  hide rows, names, colour limits, bars, section titles / colours / order, "Add sensor" from the live sensor list).
+  Changes apply live. The *Data source* tab also lists which data the active source cannot provide, and why.
 - **Multi-column layout** for wide screens: sections are distributed over 1 to 3 columns (automatic by window shape).
 - English and Turkish UI (follows the Windows display language by default).
-- Pure Python standard library; no packages to install.
+- Pure Python standard library; no packages to install (`psutil` is an optional fallback, see below).
 
 ## Requirements
 
 - Windows 10 / 11
-- [HWiNFO64](https://www.hwinfo.com/download/) with **Settings > "Shared Memory Support" enabled**
-  (in the Sensors window settings). The free version limits the shared memory to **12 hours** per start; with the
-  installed tasks the panel restarts HWiNFO for you, otherwise restart it yourself.
 - Only for running from source: Python 3.10+ with tkinter (python.org installer, or the Microsoft Store version). Check:
   `python -c "import tkinter"`. The Setup / portable zip bundle their own Python.
+- One data source (see the next section). For HWiNFO: [HWiNFO64](https://www.hwinfo.com/download/) with
+  **Settings > "Shared Memory Support" enabled** (in the Sensors window settings). The free version limits the shared
+  memory to **12 hours** per start; with the installed tasks the panel restarts HWiNFO for you, otherwise restart it
+  yourself.
+
+## Data sources
+
+| | HWiNFO | LibreHardwareMonitor | Built-in |
+|---|---|---|---|
+| Install | HWiNFO64 (free / Pro) | LHM (open source, MPL-2.0) | nothing |
+| Needs admin rights | yes (HWiNFO runs elevated) | yes (LHM runs elevated) | no |
+| CPU usage, per-core clocks, RAM | ✓ | ✓ | ✓ (clocks as estimated by Windows) |
+| CPU temperatures, CPU power, voltages | ✓ | ✓ | ✗ |
+| Motherboard VRM / PCH temperatures, fans | ✓ | ✓ (most Super I/O chips) | ✗ |
+| GPU temperature, clock, load, power, fan, VRAM | ✓ | ✓ | NVIDIA: ✓ (NVML) · AMD / Intel: load and VRAM only |
+| GPU hot spot / memory junction | ✓ | ✓ (most GPUs) | ✗ |
+| Drive temperatures | ✓ | ✓ | ✗ |
+| Network, disk throughput | ✓ | ✓ | ✓ |
+| FPS | ✓ (HWiNFO's PresentMon) | optional, PresentMon (experimental) | optional, PresentMon (experimental) |
+| Panel starts / stops it, interval sync, auto restart | ✓ (with `install.ps1`) | – | – |
+
+CPU temperatures, fans, voltages and CPU power can only be read through a **signed kernel driver**: that is what
+HWiNFO and LibreHardwareMonitor install. Windows itself does not expose them to normal programs, so the built-in source
+cannot show them; the panel says so in the settings window.
+
+Choose the source in **Settings > Data source** (or `"backend"` in `config.json`):
+
+* `auto` (default): HWiNFO if its shared memory is there (or if the panel is set up to start HWiNFO itself), otherwise
+  LibreHardwareMonitor if it is reachable, otherwise built-in. The panel switches up to HWiNFO / LHM as soon as they
+  appear, and falls back when they stay gone (15 s; 90 s when the panel manages HWiNFO).
+* `hwinfo`, `lhm`, `builtin`: always that one.
+
+**LibreHardwareMonitor:** start it (as administrator) and enable **Options > Remote Web Server > Run** (port 8085).
+The panel reads `http://127.0.0.1:8085/data.json` (`lhm_url` to change it). If the web server is off, it falls back to
+the WMI namespace `root\LibreHardwareMonitor` (only in LHM versions that still provide it). *Status: the LHM source
+is implemented and tested against LHM's documented `data.json` / WMI formats with synthetic data, but not yet against a
+running LibreHardwareMonitor; please report problems.*
+
+**Built-in:** Windows performance counters (English counter names, any Windows language), `GlobalMemoryStatusEx`,
+and NVML (`nvml.dll`, installed with every NVIDIA driver) through `ctypes`: no package and no admin rights needed.
+Optional (source installs): `pip install psutil` is used only if the Windows performance counters are broken (then repair them with
+`lodctr /r` as administrator, or install psutil for CPU / network / disk data).
+
+**FPS without HWiNFO (optional, experimental):** download Intel's
+[PresentMon](https://github.com/GameTechDev/PresentMon/releases) console application and set its path in
+Settings > Data source (`presentmon_path`). It measures the application in the foreground window. PresentMon needs
+administrator rights or membership in the Windows group *Performance Log Users*. *Status: implemented, not yet tested
+with a real PresentMon.*
 
 ## Install
 
@@ -115,6 +166,7 @@ Set the environment variable `HWINFO_PANEL_DIR` to use another folder (portable 
 
 | Key | Values | Meaning |
 |---|---|---|
+| `backend` | `"auto"`, `"hwinfo"`, `"lhm"`, `"builtin"` | data source, see [Data sources](#data-sources) |
 | `language` | `"auto"`, `"tr"`, `"en"` | UI language (`auto` = Windows display language) |
 | `monitor` | `"auto"` or index | `auto` = first non-primary portrait monitor, otherwise the primary one. Indexes: `python tools/list_monitors.py` |
 | `window_mode` | `"maximized"`, `"fullscreen"`, `"window"` | how the window is placed on that monitor |
@@ -123,25 +175,31 @@ Set the environment variable `HWINFO_PANEL_DIR` to use another folder (portable 
 | `topmost` | `true` / `false` | keep the window on top |
 | `interval` | 0.5 to 30 | CSV logging interval in seconds |
 | `logging` | `true` / `false` | recording on/off (also toggled in the panel) |
-| `log_all` | `true` / `false` | `false` = only the rows shown, `true` = every HWiNFO sensor |
+| `log_all` | `true` / `false` | `false` = only the rows shown, `true` = every sensor reading of the source |
 | `log_dir` | path or `""` | CSV folder; `""` = `%LOCALAPPDATA%\HWiNFO Panel\logs` |
 | `csv_delimiter`, `csv_decimal` | `"auto"` or a character | `auto` uses the Windows list separator / decimal symbol so Excel opens the file correctly |
-| `sync_hwinfo_interval` | `true` / `false` | also set HWiNFO's polling interval to `interval` (needs the installed tasks) |
-| `manage_hwinfo` | `true` / `false` | start HWiNFO with the panel, stop it on close (needs the installed tasks) |
+| `sync_hwinfo_interval` | `true` / `false` | also set HWiNFO's polling interval to `interval` (needs the installed tasks; HWiNFO source only) |
+| `manage_hwinfo` | `true` / `false` | start HWiNFO with the panel, stop it on close (needs the installed tasks; HWiNFO source only) |
 | `hwinfo_path` | `"auto"` or path | location of `HWiNFO64.EXE` (auto: registry, then `%ProgramFiles%\HWiNFO64`) |
-| `sections` | `"auto"` or a list | the layout, see below |
+| `lhm_url` | `"auto"` or URL | LibreHardwareMonitor web server (`auto` = `http://127.0.0.1:8085/data.json`) |
+| `presentmon_path` | `""` or path | PresentMon console exe for FPS with the LHM / built-in source (`""` = off) |
+| `sections` | `"auto"` or a list | the layout of the HWiNFO source, see below |
+| `sections_lhm`, `sections_builtin` | `"auto"` or a list | the layouts of the other sources (missing = `auto`) |
 
 ### Customising the layout
 
 With `"sections": "auto"` the layout is detected from your sensors each time the panel starts. To edit it, write the
-detected layout into `config.json` (HWiNFO must be running):
+detected layout into `config.json`:
 
 ```
-python tools/export_layout.py
+python tools/export_layout.py                     # data source from config.json
+python tools/export_layout.py --backend builtin   # or hwinfo / lhm
 ```
 
 and change the `sections` list, or use the layout tab of the settings window (it writes the same list; "Reset to
 auto layout" sets `"sections": "auto"` again). If none of your rows exists on a PC, the panel falls back to auto-detection.
+The sources name their sensors differently, so each one has its own key: `sections` (HWiNFO), `sections_lhm`,
+`sections_builtin`; the settings window always edits the layout of the active source.
 
 ```json
 "sections": [
@@ -160,9 +218,11 @@ auto layout" sets `"sections": "auto"` again). If none of your rows exists on a 
 ```
 
 * `icon`: `gauge`, `bolt`, `temp`, `fan`, `net`, `fps`. `color`: any `#rrggbb`.
-* `sensor`, `label`: **case-insensitive regular expressions** (`re.search`) matched against HWiNFO's
+* `sensor`, `label`: **case-insensitive regular expressions** (`re.search`) matched against the
   **original English** sensor and reading names, so a layout works with any HWiNFO / Windows language. `sensor` is
-  optional. The first matching reading wins. `type` (optional): 1 temp, 2 voltage, 3 fan, 4 current, 5 power,
+  optional. The built-in source uses HWiNFO's names (`CPU [#0]: …` / `Total CPU Usage`, `GPU [#0]: …` /
+  `GPU Temperature` …); LibreHardwareMonitor keeps its own reading names (`Core (Tctl/Tdie)`, `CPU Total`, `Package` …)
+  with HWiNFO-style sensor prefixes (`CPU [#0]: `, `GPU [#0]: `, `System: `, `Network: `, `Drive: `, `S.M.A.R.T.: `). The first matching reading wins. `type` (optional): 1 temp, 2 voltage, 3 fan, 4 current, 5 power,
   6 clock, 7 usage, 8 other.
 * `format`: Python format for the number, e.g. `"{:.1f}"`. `unit`: text shown (default: HWiNFO's unit).
 * `visible` (row, optional, default `true`): `false` hides the row (not shown, not logged in "required" mode) but keeps
@@ -170,23 +230,26 @@ auto layout" sets `"sections": "auto"` again). If none of your rows exists on a 
 * `limits`: `[green_value, red_value]`: the colour moves from green to red between them (a bigger green value than
   red value reverses it, as for FPS). Without `limits` the row has no bar / gradient. `bar`: `false` hides the bar.
 * To find the names on your PC: `python tools/list_sensors.py` (optionally with filter words:
-  `python tools/list_sensors.py gpu temp`). The output may contain serial numbers; do not post it publicly.
+  `python tools/list_sensors.py gpu temp`, or another source: `--backend builtin`). The output may contain serial
+  numbers; do not post it publicly. `python tools/check_layout.py [--backend …]` checks that every row finds a reading.
 
 ### CSV format
 
 One file per recording session: `YYYY-MM-DD_HH-MM-SS.csv` in `log_dir`, UTF-8 with BOM, first column the time stamp,
-then one column per row ("name (unit)") or, in "all data" mode, one column per HWiNFO reading
+then one column per row ("name (unit)") or, in "all data" mode, one column per reading of the source
 ("sensor | label [unit]"). Delimiter and decimal symbol follow your Windows regional settings by default
 (e.g. `;` and `,` in Turkish / German Excel).
 
 ### Privacy
 
-Everything stays on your PC. The panel reads HWiNFO's local shared memory and writes only the files above.
-It has no network code and sends nothing anywhere.
+Everything stays on your PC. The panel reads HWiNFO's local shared memory, LibreHardwareMonitor's web server on
+this PC (`127.0.0.1` by default) or Windows' own counters, and writes only the files above. It sends nothing anywhere.
 
 ## Troubleshooting
 
 * "HWiNFO is running but shared memory is off": enable *Shared Memory Support* in HWiNFO's settings and restart it.
+* "LibreHardwareMonitor not reachable": start LHM and enable *Options > Remote Web Server > Run*.
+* No CPU temperature / fans with the built-in source: expected, see [Data sources](#data-sources).
 * Values freeze every 12 hours with the free HWiNFO: install the tasks (`install.ps1`) for automatic restart.
 * Wrong monitor: `python tools/list_monitors.py`, then set `"monitor"`.
 * Python icon instead of the panel icon in the taskbar when started with `python panel.py`: use the Start Menu shortcut.
@@ -194,7 +257,9 @@ It has no network code and sends nothing anywhere.
 
 ## Development
 
-`hwsm.py` (shared memory reader), `layout.py` (rows, matching, auto-detection), `config.py` (settings, monitors),
+`backend.py` (data source selection), `hwsm.py` (HWiNFO shared memory reader), `sens_lhm.py` (LibreHardwareMonitor),
+`sens_builtin.py` (built-in: PDH, NVML, DXGI), `presentmon.py` (optional FPS),
+`layout.py` (rows, matching, auto-detection), `config.py` (settings, monitors),
 `hwctl.py` (HWiNFO detection and tasks), `i18n.py` (strings), `panel.py` (UI), `settings_ui.py` (settings window),
 `winicon.py` (taskbar identity), `version.py`, `packaging/` (PyInstaller spec, Inno Setup script, build script),
 `make_icon.py` (regenerates `panel.ico`). License: MIT.
@@ -203,12 +268,39 @@ It has no network code and sends nothing anywhere.
 
 ## Türkçe
 
-HWiNFO'nun paylaşılan belleğinden canlı veri gösteren, her zaman üstte duran küçük bir Windows panosu: saat/kullanım,
-güç, sıcaklık, fan, ağ/disk ve PresentMon FPS; her satırda yeşilden kırmızıya renk, çubuk ve panel tarafında
-MİN / MAKS / ORT. İsterseniz değerleri CSV dosyasına kaydeder. HWiNFO / REALiX ile bağlantısı yoktur.
+Canlı sensör verisi gösteren, her zaman üstte duran küçük bir Windows panosu: saat/kullanım, güç, sıcaklık, fan,
+ağ/disk ve FPS; her satırda yeşilden kırmızıya renk, çubuk ve panel tarafında MİN / MAKS / ORT. İsterseniz değerleri
+CSV dosyasına kaydeder. HWiNFO / REALiX veya LibreHardwareMonitor projesiyle bağlantısı yoktur.
 
-**Gereksinimler:** Windows 10/11; HWiNFO64 (Ayarlar > **Shared Memory Support** açık; ücretsiz sürümde paylaşılan
-bellek her başlatmada **12 saat** ile sınırlıdır); Python 3.10+ (tkinter dahil; yalnızca kaynaktan çalıştırmak için).
+**Gereksinimler:** Windows 10/11; Python 3.10+ (tkinter dahil; yalnızca kaynaktan çalıştırmak için); bir veri kaynağı (aşağıda). HWiNFO için: Ayarlar >
+**Shared Memory Support** açık olmalı (ücretsiz sürümde paylaşılan bellek her başlatmada **12 saat** ile sınırlıdır).
+
+**Veri kaynakları** (Ayarlar > **Veri kaynağı** veya `config.json` içinde `"backend"`):
+
+| | HWiNFO | LibreHardwareMonitor | Yerleşik |
+|---|---|---|---|
+| Kurulum | HWiNFO64 | LHM (açık kaynak) | gerekmez |
+| Yönetici hakkı | evet | evet | hayır |
+| CPU kullanımı, çekirdek saatleri, RAM | ✓ | ✓ | ✓ (saatler Windows tahmini) |
+| CPU sıcaklıkları, CPU gücü, voltajlar | ✓ | ✓ | ✗ |
+| Anakart VRM / PCH sıcaklığı, fanlar | ✓ | ✓ (çoğu Super I/O) | ✗ |
+| GPU sıcaklık, saat, yük, güç, fan, VRAM | ✓ | ✓ | NVIDIA: ✓ (NVML) · AMD / Intel: yalnızca yük ve VRAM |
+| Disk sıcaklıkları | ✓ | ✓ | ✗ |
+| Ağ, disk hızı | ✓ | ✓ | ✓ |
+| FPS | ✓ (HWiNFO'nun PresentMon'u) | isteğe bağlı, PresentMon (deneysel) | isteğe bağlı, PresentMon (deneysel) |
+| Panelin açıp kapatması, aralık eşitleme, otomatik yeniden başlatma | ✓ (`install.ps1` ile) | – | – |
+
+CPU sıcaklıkları, fanlar, voltajlar ve CPU gücü yalnızca **imzalı bir çekirdek sürücüsü** ile okunabilir (HWiNFO ve
+LibreHardwareMonitor bunu kurar); Windows bu verileri normal programlara vermez, bu yüzden yerleşik kaynak gösteremez.
+`auto` (varsayılan): HWiNFO varsa (veya panel HWiNFO'yu kendisi başlatacak şekilde kuruluysa) HWiNFO, yoksa
+erişilebiliyorsa LibreHardwareMonitor, yoksa yerleşik; HWiNFO / LHM sonradan açılırsa panel onlara geçer.
+**LibreHardwareMonitor:** yönetici olarak açın ve **Options > Remote Web Server > Run** seçin (port 8085); panel
+`http://127.0.0.1:8085/data.json` adresini okur (yedek: WMI `root\LibreHardwareMonitor`). *Durum: LHM kaynağı
+sentetik veriyle test edildi, çalışan bir LHM ile henüz denenmedi.* **Yerleşik:** Windows performans sayaçları,
+`GlobalMemoryStatusEx` ve NVML (`nvml.dll`, NVIDIA sürücüsüyle gelir) `ctypes` ile; paket gerekmez. İsteğe bağlı (kaynaktan
+çalıştırırken) `pip install psutil` yalnızca Windows performans sayaçları bozuksa kullanılır. **HWiNFO'suz FPS (isteğe bağlı,
+deneysel):** Intel [PresentMon](https://github.com/GameTechDev/PresentMon/releases) konsol uygulamasının yolunu
+Ayarlar > Veri kaynağı'nda girin (`presentmon_path`); yönetici hakkı veya *Performance Log Users* grubu gerekir.
 
 **Kurulum:** üç yol var. (1) **Önerilen:** [Releases](../../releases) sayfasından `HWiNFO-Panel-Setup-<sürüm>.exe`
 dosyasını indirip çalıştırın (Python gerekmez; Türkçe/İngilizce sihirbaz). `%ProgramFiles%\HWiNFO Panel` altına kurulur,
@@ -226,18 +318,21 @@ salt okunur). (3) **Kaynaktan:** klasörü bir yere koyun, HWiNFO'da Shared Memo
 
 **Ayarlar:** `%LOCALAPPDATA%\HWiNFO Panel\config.json` ilk açılışta oluşur. `language` (`auto`/`tr`/`en`), `monitor`,
 `window_mode`, `interval`, `log_dir`, `manage_hwinfo` vb. yukarıdaki tabloda açıklanmıştır. Düzen varsayılan olarak
-donanımınızdan otomatik üretilir; düzenlemek için HWiNFO açıkken `python tools/export_layout.py` ile `sections`
-listesini yazdırıp elle değiştirin. Sensör ve etiket kalıpları HWiNFO'nun **İngilizce orijinal adlarına** göre
-(düzenli ifade) eşleşir; adları görmek için `python tools/list_sensors.py` kullanın (çıktıda seri numaraları
-olabilir, paylaşmayın).
+donanımınızdan otomatik üretilir; düzenlemek için `python tools/export_layout.py` ile `sections` listesini yazdırıp
+elle değiştirin. Her veri kaynağının kendi düzeni vardır: `sections` (HWiNFO), `sections_lhm`, `sections_builtin`.
+Sensör ve etiket kalıpları **İngilizce orijinal adlara** göre (düzenli ifade) eşleşir; adları görmek için
+`python tools/list_sensors.py` (başka kaynak için `--backend builtin`) kullanın (çıktıda seri numaraları olabilir,
+paylaşmayın).
 
 **Ayarlar penceresi:** durum çubuğunda aralık kutusunun yanındaki dişli düğmesi veya `S` tuşu. Dil, sütun sayısı, monitör,
-pencere modu, her zaman üstte, satır / yazı ölçeği, kayıt ve CSV biçimi, HWiNFO seçenekleri ve düzenin kendisi
-(satırları gösterme / gizleme, adlar, renk sınırları, çubuklar, bölüm başlığı / rengi / sırası, canlı HWiNFO
-listesinden "Sensör ekle") buradan değiştirilir; değişiklikler anında uygulanır. **Sütunlar:** geniş ekranlarda bölümler
+pencere modu, her zaman üstte, satır / yazı ölçeği, kayıt ve CSV biçimi, veri kaynağı ve HWiNFO seçenekleri ve
+düzenin kendisi (satırları gösterme / gizleme, adlar, renk sınırları, çubuklar, bölüm başlığı / rengi / sırası, canlı
+sensör listesinden "Sensör ekle") buradan değiştirilir; Veri kaynağı sekmesi etkin kaynağın hangi verileri
+veremediğini ve nedenini de gösterir; değişiklikler anında uygulanır. **Sütunlar:** geniş ekranlarda bölümler
 1-3 sütuna dağıtılır (`columns`: `auto`, 1, 2, 3; `ui_scale`: 80-150). Gizlenen satırlar `"visible": false` olarak
 dosyada kalır.
 
 **Kısayollar:** `L` kaydı açar/kapatır, `S` ayarlar, `F11` tam ekran. **CSV:** her kayıt oturumu ayrı dosyadır; ayırıcı ve ondalık
 işareti varsayılan olarak Windows bölge ayarlarından alınır (Türkçe Excel için `;` ve `,`).
-**Gizlilik:** veriler bilgisayarınızdan çıkmaz; ağ erişimi yoktur.
+**Gizlilik:** veriler bilgisayarınızdan çıkmaz; tek ağ bağlantısı (LHM kaynağında) bu bilgisayardaki
+LibreHardwareMonitor web sunucusunadır (`127.0.0.1`).

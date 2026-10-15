@@ -3,7 +3,8 @@
 ``SettingsWindow(api)`` gets a small API object from panel.py:
     root, cfg (live dict, read only here), C (colours), fonts (text, heading, mono),
     apply(changes, lay_mode, lay_cfg) -> bool, layout() -> (is_auto, sections_cfg), readings() -> [reading],
-    monitor() -> dict | None, monitors() -> [dict], refresh_tasks() -> bool, detect(path_setting) -> path
+    monitor() -> dict | None, monitors() -> [dict], refresh_tasks() -> bool, detect(path_setting) -> path,
+    source (backend.Manager: the active data source)
 """
 import copy
 import os
@@ -12,6 +13,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
+import backend
 import config
 import hwctl
 import i18n
@@ -438,26 +440,75 @@ class SettingsWindow:
         except OSError:
             self.say(t("st_open_err"), error=True)
 
-    # ---------------- HWiNFO
+    # ---------------- data source (+ HWiNFO options)
     def _tab_hw(self, p, cfg):
+        C = self.C
+        self.be_vals = list(backend.BACKENDS)
+        cur = config.norm_backend(cfg.get("backend"))
+        self.cb_backend = self.combo(p, [t("st_be_" + v) for v in self.be_vals], self.be_vals.index(cur), 46)
+        self._grid_row(p, 0, t("st_backend"), self.cb_backend)
+        self.lbl_src = tk.Label(p, text="", bg=C["bg"], fg=C["fg"], font=(self.F_TXT, 10), anchor="w",
+                                justify="left", wraplength=600)
+        self.lbl_src.grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 2))
+        self.lbl_avail = self.label(p, "", dim=True, size=9, wrap=600)
+        self.lbl_avail.grid(row=2, column=1, columnspan=2, sticky="w")
+        self.lbl_notes = tk.Label(p, text="", bg=C["bg"], fg=C["yellow"], font=(self.F_TXT, 9), anchor="w",
+                                  justify="left", wraplength=600)
+        self.lbl_notes.grid(row=3, column=1, columnspan=2, sticky="w", pady=(4, 0))
+        self.small_btn(p, t("st_refresh"), self.update_sources, bg=C["bg"]).grid(row=4, column=1, sticky="w",
+                                                                                   pady=(4, 8))
+
+        self.v_lhm = tk.StringVar(value=str(cfg.get("lhm_url") or "auto"))
+        self.e_lhm = self.entry(p, self.v_lhm, 52)
+        self.label(p, t("st_lhm_url")).grid(row=5, column=0, sticky="w", padx=(0, 16), pady=(6, 0))
+        self.e_lhm.grid(row=5, column=1, columnspan=2, sticky="w", pady=(6, 0), ipady=3)
+        self.label(p, t("st_lhm_hint"), dim=True, size=9, wrap=600).grid(row=6, column=1, columnspan=2,
+                                                                          sticky="w", pady=(0, 6))
+
+        def ok_lhm():
+            v = self.v_lhm.get().strip().lower()
+            return v in ("", "auto") or re.match(r"^https?://[^\s/]+(/\S*)?$", v) is not None
+        rc = self.add_check(self.checks, 2, [self.e_lhm], ok_lhm)
+        self.v_lhm.trace_add("write", lambda *a: rc())
+
+        self.v_pm = tk.StringVar(value=str(cfg.get("presentmon_path") or ""))
+        self.label(p, t("st_pm_path")).grid(row=7, column=0, sticky="w", padx=(0, 16), pady=(6, 0))
+        row = tk.Frame(p, bg=C["bg"])
+        row.grid(row=7, column=1, columnspan=2, sticky="w", pady=(6, 0))
+        self.e_pm = self.entry(row, self.v_pm, 52)
+        self.e_pm.pack(side="left", ipady=3)
+        self.button(row, t("st_browse"), self.browse_pm).pack(side="left", padx=(8, 0))
+        self.label(p, t("st_pm_hint"), dim=True, size=9, wrap=600).grid(row=8, column=1, columnspan=2,
+                                                                         sticky="w", pady=(0, 6))
+
+        def ok_pm():
+            v = self.v_pm.get().strip()
+            return v == "" or os.path.isfile(os.path.expandvars(v))
+        rc2 = self.add_check(self.checks, 2, [self.e_pm], ok_pm)
+        self.v_pm.trace_add("write", lambda *a: rc2())
+
+        tk.Frame(p, bg=C["border"], height=1).grid(row=9, column=0, columnspan=3, sticky="ew", pady=(14, 10))
+        self.label(p, "HWiNFO", bold=True).grid(row=10, column=0, sticky="w")
+        self.label(p, t("st_hw_only"), dim=True, size=9, wrap=600).grid(row=10, column=1, columnspan=2, sticky="w")
+
         self.v_hwpath = tk.StringVar(value=str(cfg.get("hwinfo_path") or "auto"))
-        self.label(p, t("st_hwpath")).grid(row=0, column=0, sticky="w", padx=(0, 16), pady=6)
-        row = tk.Frame(p, bg=self.C["bg"])
-        row.grid(row=0, column=1, sticky="w", pady=6)
+        self.label(p, t("st_hwpath")).grid(row=11, column=0, sticky="w", padx=(0, 16), pady=6)
+        row = tk.Frame(p, bg=C["bg"])
+        row.grid(row=11, column=1, columnspan=2, sticky="w", pady=6)
         self.e_hwpath = self.entry(row, self.v_hwpath, 52)
         self.e_hwpath.pack(side="left", ipady=3)
         self.button(row, t("st_browse"), self.browse_hw).pack(side="left", padx=(8, 0))
         self.lbl_detected = self.label(p, "", dim=True, size=9, wrap=560)
-        self.lbl_detected.grid(row=1, column=1, sticky="w", pady=(0, 10))
+        self.lbl_detected.grid(row=12, column=1, columnspan=2, sticky="w", pady=(0, 10))
         self._detect_job = None
 
         def ok_path():
             v = self.v_hwpath.get().strip()
             return v == "" or v.lower() == "auto" or os.path.isfile(os.path.expandvars(v))
-        rc = self.add_check(self.checks, 2, [self.e_hwpath], ok_path)
+        rc3 = self.add_check(self.checks, 2, [self.e_hwpath], ok_path)
 
         def changed(*a):
-            rc()
+            rc3()
             if self._detect_job:
                 self.win.after_cancel(self._detect_job)
             self._detect_job = self.win.after(250, self.update_detected)
@@ -465,15 +516,44 @@ class SettingsWindow:
 
         self.v_manage = tk.BooleanVar(value=bool(cfg.get("manage_hwinfo")))
         self.v_sync = tk.BooleanVar(value=bool(cfg.get("sync_hwinfo_interval")))
-        Check(p, t("st_manage"), self.v_manage, self.C, (self.F_TXT, 10)).grid(row=2, column=1, sticky="w", pady=6)
-        Check(p, t("st_sync"), self.v_sync, self.C, (self.F_TXT, 10)).grid(row=3, column=1, sticky="w", pady=6)
+        Check(p, t("st_manage"), self.v_manage, C, (self.F_TXT, 10)).grid(row=13, column=1, columnspan=2,
+                                                                         sticky="w", pady=6)
+        Check(p, t("st_sync"), self.v_sync, C, (self.F_TXT, 10)).grid(row=14, column=1, columnspan=2,
+                                                                     sticky="w", pady=6)
 
         tasks = self.api.refresh_tasks()
-        self.lbl_tasks = tk.Label(p, text=t("st_tasks_ok") if tasks else t("st_tasks_no"), bg=self.C["bg"],
-                                  fg=self.C["green"] if tasks else self.C["yellow"], font=(self.F_TXT, 10),
+        self.lbl_tasks = tk.Label(p, text=t("st_tasks_ok") if tasks else t("st_tasks_no"), bg=C["bg"],
+                                  fg=C["green"] if tasks else C["yellow"], font=(self.F_TXT, 10),
                                   anchor="w", justify="left", wraplength=560)
-        self.lbl_tasks.grid(row=4, column=1, sticky="w", pady=(14, 6))
+        self.lbl_tasks.grid(row=15, column=1, columnspan=2, sticky="w", pady=(14, 6))
         self.update_detected()
+        self.update_sources()
+
+    def update_sources(self):
+        """Active source, what is available on this PC, and which data the active source cannot provide."""
+        src = self.api.source
+        try:
+            hw = backend.hwinfo_available()
+            lhm = backend.lhm_available({"lhm_url": self.v_lhm.get().strip() or "auto"})
+        except Exception:
+            hw = lhm = False
+        via = src.via()
+        yes, no = t("st_av_yes"), t("st_av_no")
+        avail = (f"{t('st_avail')}:   {t('st_av_hw')}: {yes if hw else no}   ·   {t('st_av_lhm')}: "
+                 f"{yes if lhm else no}   ·   {t('st_av_builtin')}: {t('st_av_always')}")
+        notes = src.notes()
+        try:
+            self.lbl_src.config(text=t("st_active", name=backend.display_name(src.active) +
+                                       (f" ({via.upper()})" if via else "")))
+            self.lbl_avail.config(text=avail)
+            self.lbl_notes.config(text=(t("st_missing") + ":\n• " + "\n• ".join(notes)) if notes else "")
+        except tk.TclError:
+            pass
+
+    def browse_pm(self):
+        f = filedialog.askopenfilename(parent=self.win, title="PresentMon", filetypes=[("*.exe", "*.exe")])
+        if f:
+            self.v_pm.set(os.path.normpath(f))
 
     def update_detected(self):
         self._detect_job = None
@@ -870,6 +950,9 @@ class SettingsWindow:
             "log_dir": self.v_logdir.get().strip(),
             "csv_delimiter": self.delim_vals[max(0, self.cb_delim.current())],
             "csv_decimal": self.dec_vals[max(0, self.cb_dec.current())],
+            "backend": self.be_vals[max(0, self.cb_backend.current())],
+            "lhm_url": self.v_lhm.get().strip() or "auto",
+            "presentmon_path": self.v_pm.get().strip(),
             "hwinfo_path": self.v_hwpath.get().strip() or "auto",
             "manage_hwinfo": bool(self.v_manage.get()),
             "sync_hwinfo_interval": bool(self.v_sync.get()),
@@ -921,6 +1004,7 @@ class SettingsWindow:
             except tk.TclError:
                 pass
             self._lay_note()
+            self.update_sources()
         self.say(t("st_applied") if ok else t("st_write_err"), error=not ok)
         return ok
 
