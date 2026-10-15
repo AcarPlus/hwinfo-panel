@@ -370,4 +370,8 @@ dosyada kalır.
 **Kısayollar:** `L` kaydı açar/kapatır, `S` ayarlar, `F11` tam ekran. **CSV:** her kayıt oturumu ayrı dosyadır; ayırıcı ve ondalık
 işareti varsayılan olarak Windows bölge ayarlarından alınır (Türkçe Excel için `;` ve `,`).
 **Gizlilik:** veriler bilgisayarınızdan çıkmaz; tek ağ bağlantısı (LHM kaynağında) bu bilgisayardaki
-LibreHardwareMonitor web sunucusunadır (`127.0.0.1`).
+LibreHardwareMonitor web sunucusunadır (`127.0.0.1`). Kurulumda "HWiNFO64'ü de kur" seçilirse HWiNFO winget ile indirilir.
+
+**Kod imzalama:** Ücretsiz kod imzalama [SignPath.io](https://about.signpath.io), sertifika
+[SignPath Foundation](https://signpath.org) tarafından sağlanır (başvuru aşamasında; o zamana kadar sürümler
+imzasızdır). Ayrıntılar: [Code signing policy](#code-signing-policy).
