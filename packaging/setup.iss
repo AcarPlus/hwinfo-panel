@@ -144,24 +144,46 @@ begin
 end;
 
 // HWiNFO Panel reads HWiNFO's sensor shared memory: make sure it is enabled
-procedure EnsureSharedMemory(const exe: String; fresh: Boolean);
+// HWiNFO settings the panel relies on: sensors-only, started minimised to the tray, closing the
+// sensors window only minimises it, no welcome / progress dialogs, shared memory on.
+const
+  HwKeyCount = 6;
+
+function HwKey(i: Integer): String;
+begin
+  case i of
+    0: Result := 'SensorsSM';
+    1: Result := 'SensorsOnly';
+    2: Result := 'MinimalizeSensors';
+    3: Result := 'MinimalizeMainWnd';
+    4: Result := 'MinimalizeSensorsClose';
+    5: Result := 'ShowWelcomeAndProgress';
+  end;
+end;
+
+function HwValue(i: Integer): String;
+begin
+  if i = 5 then Result := '0' else Result := '1';
+end;
+
+procedure EnsureHwinfoSettings(const exe: String);
 var
   ini: String;
-  rc: Integer;
+  i, rc: Integer;
+  need: Boolean;
 begin
   ini := ExtractFilePath(exe) + 'HWiNFO64.INI';
-  if GetIniString('Settings', 'SensorsSM', '0', ini) = '1' then
+  need := False;
+  for i := 0 to HwKeyCount - 1 do
+    if GetIniString('Settings', HwKey(i), '', ini) <> HwValue(i) then
+      need := True;
+  if not need then
     Exit;
   // HWiNFO rewrites its INI when it exits: close it politely first (the panel starts it again)
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/im HWiNFO64.EXE', '', SW_HIDE, ewWaitUntilTerminated, rc);
   Sleep(3000);
-  SetIniString('Settings', 'SensorsSM', '1', ini);
-  if fresh then
-  begin
-    // fresh HWiNFO install: start straight in sensors-only mode without the welcome dialog
-    SetIniString('Settings', 'SensorsOnly', '1', ini);
-    SetIniString('Settings', 'ShowWelcomeAndProgress', '0', ini);
-  end;
+  for i := 0 to HwKeyCount - 1 do
+    SetIniString('Settings', HwKey(i), HwValue(i), ini);
 end;
 
 function HwinfoMissing(): Boolean;
@@ -180,7 +202,7 @@ begin
   if (hw = '') and WizardIsTaskSelected('installhwinfo') then
   begin
     if InstallHwinfoWinget() then
-      EnsureSharedMemory(FindHwinfo(), True)
+      EnsureHwinfoSettings(FindHwinfo())
     else
     begin
       SuppressibleMsgBox(CustomMessage('HwinfoInstallFailed'), mbInformation, MB_OK, IDOK);
@@ -188,7 +210,7 @@ begin
     end;
   end
   else if hw <> '' then
-    EnsureSharedMemory(hw, False);
+    EnsureHwinfoSettings(hw);
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\tasks\register_tasks.ps1') + '"' +
             ' -User "' + GetEnv('USERDOMAIN') + '\' + ExpandConstant('{username}') + '"' +
             ' -AppExe "' + ExpandConstant('{app}\{#AppExe}') + '"';

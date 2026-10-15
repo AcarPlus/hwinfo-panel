@@ -25,12 +25,16 @@ else {
     $s = $lines.FindIndex([Predicate[string]]{ param($l) $l -match '^\[Settings\]' })
     if ($s -ge 0) { $lines.Insert($s + 1, "SensorInterval=$ms") } else { $lines.Add('[Settings]'); $lines.Add("SensorInterval=$ms") }
 }
-# the panel reads HWiNFO's shared memory: make sure it stays enabled
-$sm = $lines.FindIndex([Predicate[string]]{ param($l) $l -match '^SensorsSM=' })
-if ($sm -ge 0) { $lines[$sm] = 'SensorsSM=1' }
-else {
-    $s = $lines.FindIndex([Predicate[string]]{ param($l) $l -match '^\[Settings\]' })
-    if ($s -ge 0) { $lines.Insert($s + 1, 'SensorsSM=1') } else { $lines.Add('[Settings]'); $lines.Add('SensorsSM=1') }
+# settings the panel relies on: shared memory on, HWiNFO runs as sensors-only in the background (tray)
+$want = [ordered]@{ SensorsSM = '1'; SensorsOnly = '1'; MinimalizeSensors = '1'; MinimalizeMainWnd = '1';
+                    MinimalizeSensorsClose = '1'; ShowWelcomeAndProgress = '0' }
+foreach ($k in $want.Keys) {
+    $i = $lines.FindIndex([Predicate[string]]{ param($l) $l -match "^$k=" })
+    if ($i -ge 0) { $lines[$i] = "$k=$($want[$k])" }
+    else {
+        $s = $lines.FindIndex([Predicate[string]]{ param($l) $l -match '^\[Settings\]' })
+        if ($s -ge 0) { $lines.Insert($s + 1, "$k=$($want[$k])") } else { $lines.Add('[Settings]'); $lines.Add("$k=$($want[$k])") }
+    }
 }
 Set-Content -LiteralPath $ini -Value $lines -Encoding Ascii
 

@@ -138,6 +138,23 @@ def hwinfo_interval_ms(exe):
     return 2000
 
 
+# HWiNFO64.INI settings the panel relies on (same list as set_interval.ps1 / setup.iss):
+# shared memory on, sensors-only, started minimised to the tray, no welcome / progress dialogs
+HW_SETTINGS = {"SensorsSM": "1", "SensorsOnly": "1", "MinimalizeSensors": "1", "MinimalizeMainWnd": "1",
+               "MinimalizeSensorsClose": "1", "ShowWelcomeAndProgress": "0"}
+
+
+def hwinfo_settings_ok(exe):
+    """True if HWiNFO64.INI already has every setting in HW_SETTINGS."""
+    try:
+        ini = os.path.join(os.path.dirname(exe), "HWiNFO64.INI")
+        with open(ini, encoding="ascii", errors="ignore") as f:
+            have = dict(line.strip().split("=", 1) for line in f if "=" in line)
+        return all(have.get(k) == v for k, v in HW_SETTINGS.items())
+    except Exception:
+        return False
+
+
 def sm_enabled(exe):
     """True if HWiNFO64.INI has Shared Memory Support switched on."""
     try:
@@ -162,7 +179,7 @@ def repair_hwinfo(sec, exe):
 def apply_hwinfo_interval(sec, exe):
     """Hand the logging interval to HWiNFO (task restarts HWiNFO). Returns ms if a change was started."""
     ms = int(round(sec * 1000))
-    if ms == hwinfo_interval_ms(exe) and sm_enabled(exe):
+    if ms == hwinfo_interval_ms(exe) and hwinfo_settings_ok(exe):
         return None
     try:
         os.makedirs(config.data_dir(), exist_ok=True)
