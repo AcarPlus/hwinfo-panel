@@ -10,6 +10,21 @@ The data comes from one of three sources: [HWiNFO](https://www.hwinfo.com/) (wid
 **built-in** Windows sources (nothing to install, but no CPU temperatures / fans). See [Data sources](#data-sources).
 
 > Not affiliated with, endorsed by, or sponsored by HWiNFO / REALiX s.r.o. or the LibreHardwareMonitor project.
+
+## ⬇ Download
+
+**[Download the latest Setup (HWiNFO-Panel-Setup.exe)](../../releases/latest)** — Windows 10 / 11, no Python needed.
+
+1. Run the Setup. It checks for HWiNFO and offers to install it for you (free, via winget) and to turn on its
+   *Shared Memory Support*. You can skip it: the panel then uses its built-in data source.
+2. Start **HWiNFO Panel** from the Start menu. It starts HWiNFO with it and closes it again when you close the panel.
+3. Press the ⚙ gear (or **S**) for settings: language, monitor, 1–3 columns, rows, colours, logging.
+
+The Setup is not code-signed yet, so Windows SmartScreen may show *"Windows protected your PC"*: click
+*More info → Run anyway*. Details, the portable zip and running from source: see [Install](#install).
+
+**Türkçe:** [En son Setup'ı indir](../../releases/latest) → çalıştır (HWiNFO yoksa kurmayı teklif eder) → Başlat
+menüsünden **HWiNFO Panel**'i aç. Ayarlar için ⚙ ya da **S**. Ayrıntılar: [Türkçe](#türkçe).
 > HWiNFO is a trademark of its owner. This project only *reads* the sensor data that HWiNFO publishes through its
 > documented shared memory interface (or that LibreHardwareMonitor publishes through its local web server).
 

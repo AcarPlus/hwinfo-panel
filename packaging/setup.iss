@@ -41,10 +41,16 @@ Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
 
 [CustomMessages]
 en.AutoStart=Start HWiNFO Panel when I sign in to Windows
-en.NoHwinfo=HWiNFO64 was not found on this PC.%n%nHWiNFO Panel is installed, but without the scheduled tasks it runs in read-only mode (you start HWiNFO yourself). To let the panel start / stop HWiNFO without a UAC prompt, install HWiNFO64 and run this Setup again.%n%nDownload: https://www.hwinfo.com/download/%n%nOpen the download page now?
+en.AskInstallHwinfo=HWiNFO64 was not found on this PC.%n%nHWiNFO (free) gives HWiNFO Panel the most data: CPU / GPU temperatures, fans, voltages, FPS. Without it the panel uses its built-in data source (usage, clocks, RAM, network, disk, NVIDIA GPU; no CPU temperatures or fans).%n%nInstall HWiNFO64 now?
+en.InstallingHwinfo=Installing HWiNFO64 (winget)...
+en.HwinfoInstallFailed=HWiNFO64 could not be installed automatically. The download page will open; install it and run this Setup again so the panel can start / stop HWiNFO.
+en.AskEnableSM=HWiNFO64 is installed, but its "Shared Memory Support" is off, so HWiNFO Panel cannot read its sensors.%n%nTurn it on now? (If HWiNFO is running, restart it afterwards.)
 en.TasksFailed=The scheduled tasks for HWiNFO control could not be created. The panel still works in read-only mode.%n%nDetails: C:\ProgramData\HWiNFO Panel\install_tasks.log
 tr.AutoStart=Windows'ta oturum açtığımda HWiNFO Panel başlasın
-tr.NoHwinfo=Bu bilgisayarda HWiNFO64 bulunamadı.%n%nHWiNFO Panel kuruldu, ancak zamanlanmış görevler olmadan salt okunur modda çalışır (HWiNFO'yu siz başlatırsınız). Panelin HWiNFO'yu UAC sormadan açıp kapatabilmesi için HWiNFO64'ü kurup bu kurulumu yeniden çalıştırın.%n%nİndirme: https://www.hwinfo.com/download/%n%nİndirme sayfası şimdi açılsın mı?
+tr.AskInstallHwinfo=Bu bilgisayarda HWiNFO64 bulunamadı.%n%nHWiNFO (ücretsiz), HWiNFO Panel'e en fazla veriyi sağlar: CPU / GPU sıcaklıkları, fanlar, voltajlar, FPS. HWiNFO olmadan panel dahili veri kaynağını kullanır (kullanım, saat hızları, RAM, ağ, disk, NVIDIA GPU; CPU sıcaklığı ve fanlar olmaz).%n%nHWiNFO64 şimdi kurulsun mu?
+tr.InstallingHwinfo=HWiNFO64 kuruluyor (winget)...
+tr.HwinfoInstallFailed=HWiNFO64 otomatik kurulamadı. İndirme sayfası açılacak; HWiNFO'yu kurup bu kurulumu yeniden çalıştırırsanız panel HWiNFO'yu açıp kapatabilir.
+tr.AskEnableSM=HWiNFO64 kurulu ama "Shared Memory Support" (paylaşılan bellek) ayarı kapalı, bu yüzden HWiNFO Panel sensörleri okuyamaz.%n%nŞimdi açılsın mı? (HWiNFO açıksa sonrasında yeniden başlatın.)
 tr.TasksFailed=HWiNFO denetimi için zamanlanmış görevler oluşturulamadı. Panel yine de salt okunur modda çalışır.%n%nAyrıntı: C:\ProgramData\HWiNFO Panel\install_tasks.log
 
 [Tasks]
@@ -101,13 +107,85 @@ begin
   Result := True;
 end;
 
+function FindHwinfo(): String;
+var
+  s: String;
+begin
+  Result := '';
+  if RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\HWiNFO64_is1', 'InstallLocation', s) and
+     FileExists(AddBackslash(s) + 'HWiNFO64.EXE') then
+  begin
+    Result := AddBackslash(s) + 'HWiNFO64.EXE';
+    Exit;
+  end;
+  s := ExpandConstant('{commonpf64}\HWiNFO64\HWiNFO64.EXE');
+  if FileExists(s) then begin Result := s; Exit; end;
+  s := ExpandConstant('{commonpf32}\HWiNFO64\HWiNFO64.EXE');
+  if FileExists(s) then begin Result := s; Exit; end;
+end;
+
+function InstallHwinfoWinget(): Boolean;
+var
+  winget: String;
+  rc: Integer;
+begin
+  Result := False;
+  winget := ExpandConstant('{localappdata}\Microsoft\WindowsApps\winget.exe');
+  if not FileExists(winget) then
+    winget := 'winget.exe';
+  WizardForm.StatusLabel.Caption := CustomMessage('InstallingHwinfo');
+  WizardForm.ProgressGauge.Style := npbstMarquee;
+  try
+    if Exec(winget, 'install --id REALiX.HWiNFO -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity',
+            '', SW_HIDE, ewWaitUntilTerminated, rc) then
+      Result := FindHwinfo() <> '';
+  finally
+    WizardForm.ProgressGauge.Style := npbstNormal;
+  end;
+end;
+
+// HWiNFO Panel reads HWiNFO's sensor shared memory: make sure it is enabled
+procedure EnsureSharedMemory(const exe: String; ask: Boolean);
+var
+  ini: String;
+begin
+  ini := ExtractFilePath(exe) + 'HWiNFO64.INI';
+  if GetIniString('Settings', 'SensorsSM', '0', ini) = '1' then
+    Exit;
+  if ask and (SuppressibleMsgBox(CustomMessage('AskEnableSM'), mbConfirmation, MB_YESNO, IDYES) <> IDYES) then
+    Exit;
+  SetIniString('Settings', 'SensorsSM', '1', ini);
+  if not ask then
+  begin
+    // fresh HWiNFO install: start straight in sensors-only mode without the welcome dialog
+    SetIniString('Settings', 'SensorsOnly', '1', ini);
+    SetIniString('Settings', 'ShowWelcomeAndProgress', '0', ini);
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Params: String;
+  Params, hw: String;
   rc: Integer;
 begin
   if CurStep <> ssPostInstall then
     Exit;
+  hw := FindHwinfo();
+  if hw = '' then
+  begin
+    if SuppressibleMsgBox(CustomMessage('AskInstallHwinfo'), mbConfirmation, MB_YESNO, IDYES) = IDYES then
+    begin
+      if InstallHwinfoWinget() then
+        EnsureSharedMemory(FindHwinfo(), False)
+      else
+      begin
+        SuppressibleMsgBox(CustomMessage('HwinfoInstallFailed'), mbInformation, MB_OK, IDOK);
+        ShellExec('open', 'https://www.hwinfo.com/download/', '', '', SW_SHOWNORMAL, ewNoWait, rc);
+      end;
+    end;
+  end
+  else
+    EnsureSharedMemory(hw, True);
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\tasks\register_tasks.ps1') + '"' +
             ' -User "' + GetEnv('USERDOMAIN') + '\' + ExpandConstant('{username}') + '"' +
             ' -AppExe "' + ExpandConstant('{app}\{#AppExe}') + '"';
@@ -115,12 +193,7 @@ begin
     Params := Params + ' -Autostart';
   if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, rc) then
     rc := 1;
-  if rc = 3 then
-  begin
-    // HWiNFO64.EXE not found
-    if SuppressibleMsgBox(CustomMessage('NoHwinfo'), mbInformation, MB_YESNO, IDNO) = IDYES then
-      ShellExec('open', 'https://www.hwinfo.com/download/', '', '', SW_SHOWNORMAL, ewNoWait, rc);
-  end
-  else if rc <> 0 then
+  // rc = 3: HWiNFO64.EXE not found -> no tasks; the panel falls back to its built-in data source
+  if (rc <> 0) and (rc <> 3) then
     SuppressibleMsgBox(CustomMessage('TasksFailed'), mbError, MB_OK, IDOK);
 end;

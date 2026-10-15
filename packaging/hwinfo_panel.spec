@@ -44,7 +44,7 @@ a = Analysis(
         (os.path.join(ROOT, "hidden.vbs"), "."),
         (os.path.join(ROOT, "set_interval.ps1"), "."),
     ],
-    hiddenimports=[],
+    hiddenimports=['psutil'],
     hookspath=[],
     runtime_hooks=[],
     excludes=["unittest", "pydoc", "test", "numpy", "PIL", "matplotlib"],
