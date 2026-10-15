@@ -22,6 +22,7 @@ The data comes from one of three sources: [HWiNFO](https://www.hwinfo.com/) (wid
 
 The Setup is not code-signed yet, so Windows SmartScreen may show *"Windows protected your PC"*: click
 *More info → Run anyway*. Details, the portable zip and running from source: see [Install](#install).
+Signing: see the [Code signing policy](#code-signing-policy).
 
 **Türkçe:** [En son Setup'ı indir](../../releases/latest) → çalıştır (HWiNFO yoksa kurmayı teklif eder) → Başlat
 menüsünden **HWiNFO Panel**'i aç. Ayarlar için ⚙ ya da **S**. Ayrıntılar: [Türkçe](#türkçe).
@@ -257,8 +258,27 @@ then one column per row ("name (unit)") or, in "all data" mode, one column per r
 
 ### Privacy
 
+This program will not transfer any information to other networked systems unless specifically requested by the
+user or the person installing or operating it.
+
 Everything stays on your PC. The panel reads HWiNFO's local shared memory, LibreHardwareMonitor's web server on
-this PC (`127.0.0.1` by default) or Windows' own counters, and writes only the files above. It sends nothing anywhere.
+this PC (`127.0.0.1` by default) or Windows' own counters, and writes only the files above. The only network
+access is the optional HWiNFO download during Setup (via winget, only when you tick "Also install HWiNFO64").
+HWiNFO and LibreHardwareMonitor are separate programs with their own privacy policies.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+Signed files are built automatically by GitHub Actions ([release workflow](.github/workflows/release.yml)) from the
+source code in this repository; every signing request is approved manually.
+
+| Role | Members |
+|---|---|
+| Committers and reviewers | [AcarPlus](https://github.com/AcarPlus) |
+| Approvers | [AcarPlus](https://github.com/AcarPlus) |
+
+Until signing is in place, releases are unsigned (see the SmartScreen note above).
 
 ## Troubleshooting
 

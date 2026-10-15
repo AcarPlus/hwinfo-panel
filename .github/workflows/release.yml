@@ -56,6 +56,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            Download **HWiNFO-Panel-Setup-${{ steps.ver.outputs.version }}.exe** and run it (Windows 10 / 11).
+            Portable: unzip **HWiNFO-Panel-${{ steps.ver.outputs.version }}-portable.zip** and run `HWiNFO Panel.exe`.
+
+            [Code signing policy](https://github.com/${{ github.repository }}#code-signing-policy) ·
+            [Privacy](https://github.com/${{ github.repository }}#privacy)
           files: |
             HWiNFO-Panel-Setup-${{ steps.ver.outputs.version }}.exe
             dist/HWiNFO-Panel-${{ steps.ver.outputs.version }}-portable.zip
