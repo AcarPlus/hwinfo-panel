@@ -13,7 +13,8 @@ $raw = (Get-Content -LiteralPath $ValFile -Raw -ErrorAction Stop).Trim()
 if ($raw -notmatch '^\d{1,6}$') { exit 1 }
 $ms = [Math]::Min(60000, [Math]::Max(250, [int]$raw))
 
-Stop-Process -Name HWiNFO64 -Force -ErrorAction SilentlyContinue
+# close politely first (lets HWiNFO release its driver / hardware locks), force only after 6 s
+foreach($x in @(Get-Process HWiNFO64 -EA 0)){ taskkill.exe /pid $x.Id | Out-Null; if(-not $x.WaitForExit(6000)){ Stop-Process -Id $x.Id -Force -EA 0 } }
 for ($i = 0; $i -lt 50 -and (Get-Process HWiNFO64 -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 100 }
 
 $lines = New-Object 'System.Collections.Generic.List[string]'

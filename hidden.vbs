@@ -28,7 +28,8 @@ Select Case LCase(args(0))
         cmd = "powershell.exe -NoProfile -Command ""Start-Process -FilePath '" & exe & _
               "' -WorkingDirectory '" & fso.GetParentFolderName(exe) & "'"""
     Case "stop"
-        cmd = "powershell.exe -NoProfile -Command ""Stop-Process -Name HWiNFO64 -Force -ErrorAction SilentlyContinue"""
+        ' close politely first (WM_CLOSE, lets HWiNFO release its driver and hardware locks), force only after 6 s
+        cmd = "powershell.exe -NoProfile -Command ""foreach($x in @(Get-Process HWiNFO64 -EA 0)){ taskkill.exe /pid $x.Id | Out-Null; if(-not $x.WaitForExit(6000)){ Stop-Process -Id $x.Id -Force -EA 0 } }"""
     Case "setint"
         If args.Count < 3 Then WScript.Quit 1
         exe = args(1)
