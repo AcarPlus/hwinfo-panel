@@ -1,0 +1,391 @@
+"""Panel layout: config rows -> compiled rows, matching against HWiNFO readings, hardware auto-detection.
+
+All matching uses the ORIGINAL (English) sensor / label names from HWiNFO shared memory, so a layout
+works the same on any Windows language. Patterns are case-insensitive regular expressions (re.search).
+"""
+import re
+import sys
+
+from i18n import t
+
+ICON_COLORS = {"gauge": "#58a6ff", "bolt": "#e3b341", "temp": "#ff7b72", "fan": "#39c5cf", "net": "#bc8cff",
+               "fps": "#7ee787"}
+ICONS = tuple(ICON_COLORS)
+
+# CSV decimals / display decimals by unit
+_DEC = {"°c": 0, "w": 1, "v": 3, "mhz": 0, "%": 1, "mb": 0, "rpm": 0, "kb/s": 0, "mb/s": 1, "fps": 0, "ms": 1, "a": 2}
+
+
+def decimals_for(unit):
+    return _DEC.get((unit or "").lower(), 2)
+
+
+def default_format(unit):
+    return "{:.%df}" % decimals_for(unit)
+
+
+def format_decimals(fmt, unit):
+    m = re.search(r"\.(\d+)f", fmt or "")
+    return int(m.group(1)) if m else decimals_for(unit)
+
+
+class Row:
+    """One panel row. Build with Row.from_cfg(dict)."""
+
+    def __init__(self, name, sensor, label, rtype, fmt, unit, limits, bar):
+        self.name, self.sensor, self.label, self.rtype = name, sensor, label, rtype
+        self.fmt, self.unit, self.limits, self.bar = fmt, unit, limits, bar
+        self.sre = re.compile(sensor, re.I) if sensor else None
+        self.lre = re.compile(label, re.I)
+        self.key = f"{name}|{sensor or ''}|{label}|{'' if rtype is None else rtype}"
+        self._idx = None
+        self._ms = self._ml = None
+        self.unit_eff = unit or ""        # filled in from the matched reading when no unit is configured
+
+    @classmethod
+    def from_cfg(cls, d):
+        name = str(d.get("name") or d.get("label") or "?")
+        label = d.get("label")
+        if not label:
+            raise ValueError("row without 'label'")
+        rtype = d.get("type")
+        rtype = int(rtype) if rtype not in (None, "") else None
+        lim = d.get("limits")
+        limits = None
+        if isinstance(lim, (list, tuple)) and len(lim) == 2 and lim[0] != lim[1]:
+            limits = (float(lim[0]), float(lim[1]))
+        bar = d.get("bar")
+        bar = (limits is not None) if bar is None else bool(bar and limits is not None)
+        return cls(name, d.get("sensor") or None, label, rtype, d.get("format") or None, d.get("unit") or "",
+                   limits, bar)
+
+    def match(self, rd):
+        i = self._idx
+        if i is not None and i < len(rd) and rd[i]["sensor"] == self._ms and rd[i]["label"] == self._ml:
+            return rd[i]
+        for i, r in enumerate(rd):
+            if self.sre and not self.sre.search(r["sensor"]):
+                continue
+            if self.rtype is not None and r["type"] != self.rtype:
+                continue
+            if self.lre.search(r["label"]):
+                self._idx, self._ms, self._ml = i, r["sensor"], r["label"]
+                if not self.unit:
+                    self.unit_eff = r["unit"]
+                return r
+        self._idx = None
+        return None
+
+    def fmt_value(self, v):
+        f = self.fmt or default_format(self.unit_eff)
+        try:
+            return f.format(v)
+        except Exception:
+            return f"{v:.1f}"
+
+    def csv_decimals(self):
+        return format_decimals(self.fmt, self.unit_eff)
+
+
+class Section:
+    def __init__(self, title, color, icon, rows):
+        self.title, self.color, self.icon, self.rows = title, color, icon, rows
+
+
+def build_sections(cfg_sections):
+    """Config list -> [Section]. Bad entries are skipped with a message on stderr."""
+    out = []
+    for si, s in enumerate(cfg_sections if isinstance(cfg_sections, list) else []):
+        try:
+            icon = s.get("icon") if s.get("icon") in ICONS else "gauge"
+            rows = []
+            for rd_ in s.get("rows", []):
+                try:
+                    rows.append(Row.from_cfg(rd_))
+                except Exception as ex:
+                    print(f"config: section {si}, row {rd_!r} ignored: {ex}", file=sys.stderr)
+            if rows:
+                out.append(Section(str(s.get("title", "")), s.get("color") or ICON_COLORS[icon], icon, rows))
+        except Exception as ex:
+            print(f"config: section {si} ignored: {ex}", file=sys.stderr)
+    return out
+
+
+def all_rows(sections):
+    return [r for s in sections for r in s.rows]
+
+
+def count_matches(sections, rd):
+    return sum(1 for r in all_rows(sections) if r.match(rd))
+
+
+# ------------------------------------------------------------------ colours / limits (gradient)
+STOPS = [(0.0, "#2ea043"), (0.25, "#7cc242"), (0.5, "#e3b341"), (0.75, "#f0883e"), (1.0, "#f85149")]
+
+
+def _mix(c1, c2, tt):
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * tt) for x, y in zip(a, b))
+
+
+def _build_lut(n=256):
+    lut = []
+    for k in range(n):
+        tt = k / (n - 1)
+        for (t0, c0), (t1, c1) in zip(STOPS, STOPS[1:]):
+            if tt <= t1:
+                lut.append(_mix(c0, c1, (tt - t0) / (t1 - t0)))
+                break
+    return lut
+
+
+LUT = _build_lut()
+
+
+def frac(row, v):
+    """Position of the value within the limits (0..1), for the bar; grows left->right even when reversed."""
+    if not row.limits:
+        return None
+    lo, hi = min(row.limits), max(row.limits)
+    return min(1.0, max(0.0, (v - lo) / (hi - lo)))
+
+
+def value_color(row, v, default):
+    if not row.limits:
+        return default
+    green, red = row.limits
+    tt = min(1.0, max(0.0, (v - green) / (red - green)))
+    return LUT[round(tt * 255)]
+
+
+# ================================================================== auto-detection
+_NON_MB = re.compile(r"^(CPU \[|dGPU|iGPU|GPU \[|Drive:|S\.M\.A\.R\.T\.:|Network:|System:|Memory Timings|PresentMon|"
+                     r"DDR\d|DIMM|Windows Hardware|Battery|Enhanced)", re.I)
+_VIRTUAL = re.compile(r"virtual|vpn|loopback|hyper-v|vmware|vbox|tap-|tap |tun|bluetooth|vethernet|wsl|npcap|"
+                      r"miniport|pseudo|teredo|isatap|wan |ndis|zerotier|tailscale|wireguard", re.I)
+MAX_CORE_ROWS = 16
+
+
+def _R(name, sensor, label, rtype=None, unit=None, limits=None, fmt=None):
+    d = {"name": name, "label": label}
+    if sensor:
+        d["sensor"] = sensor
+    if rtype is not None:
+        d["type"] = rtype
+    if fmt:
+        d["format"] = fmt
+    if unit:
+        d["unit"] = unit
+    if limits:
+        d["limits"] = list(limits)
+    return d
+
+
+class _Index:
+    def __init__(self, rd):
+        self.rd = rd
+        self.sensors = []
+        for r in rd:
+            if r["sensor"] not in self.sensors:
+                self.sensors.append(r["sensor"])
+
+    def readings(self, sensor_re, label_re=None, rtype=None):
+        sre = re.compile(sensor_re, re.I) if sensor_re else None
+        lre = re.compile(label_re, re.I) if label_re else None
+        return [r for r in self.rd
+                if (sre is None or sre.search(r["sensor"])) and (lre is None or lre.search(r["label"]))
+                and (rtype is None or r["type"] == rtype)]
+
+    def first(self, sensor_re, label_res, rtype=None):
+        """(label_pattern, reading) for the first pattern in label_res that matches a reading."""
+        if isinstance(label_res, str):
+            label_res = [label_res]
+        for lp in label_res:
+            rs = self.readings(sensor_re, lp, rtype)
+            if rs:
+                return lp, rs[0]
+        return None, None
+
+    def sensors_like(self, pattern):
+        p = re.compile(pattern, re.I)
+        return [s for s in self.sensors if p.search(s)]
+
+
+def _row_if(ix, name, sensor_re, label_res, rtype=None, limits=None, unit=None, fmt=None):
+    lp, r = ix.first(sensor_re, label_res, rtype)
+    return _R(name, sensor_re, lp, rtype, unit, limits, fmt) if lp else None
+
+
+def _scaled(unit, lo, hi):
+    """Limits given in KB/s, converted to the unit HWiNFO reports."""
+    k = {"kb/s": 1.0, "mb/s": 1 / 1024.0, "gb/s": 1 / 1048576.0, "b/s": 1024.0}.get((unit or "").lower(), 1.0)
+    return (lo * k, hi * k)
+
+
+def autodetect(rd):
+    """Default sections (config schema, current language) built from what HWiNFO reports. Missing rows are omitted."""
+    ix = _Index(rd)
+    sections = []
+
+    def add(title_key, icon, rows):
+        rows = [r for r in rows if r]
+        if rows:
+            sections.append({"title": t(title_key), "color": ICON_COLORS[icon], "icon": icon, "rows": rows})
+
+    cpu = r"^CPU \[#0\]"
+    cpus = ix.sensors_like(cpu)
+    gpus = [s for p in (r"^dGPU \[#", r"^GPU \[#", r"^iGPU \[#") for s in ix.sensors_like(p)]
+    gm = re.match(r"^(\w+) \[#(\d+)\]", gpus[0]) if gpus else None
+    gpu = r"^%s \[#%s\]" % (gm.group(1), gm.group(2)) if gm else None
+
+    # ---------------- clock / usage
+    rows = []
+    if cpus:
+        core_re = re.compile(r"^((?:P|E|LP E)-core|Core) ?(\d+)(?: T\d+)? Clock\b", re.I)
+        seen = set()
+        for r in ix.readings(cpu, rtype=6):
+            m = core_re.match(r["label"])
+            if not m or "effective" in r["label"].lower():
+                continue
+            base = f"{m.group(1)} {m.group(2)}"
+            if base in seen:
+                continue
+            seen.add(base)
+            if len(seen) > MAX_CORE_ROWS:
+                break
+            rows.append(_R(f"CPU {base} {t('clock')}", cpu, "^" + re.escape(base) + r"(?: T\d+)? Clock\b", 6,
+                           "MHz", (1000, 6000)))
+        rows.append(_row_if(ix, t("cpu_usage"), cpu, r"^Total CPU Usage", 7, (0, 100)))
+        rows.append(_row_if(ix, t("cpu_maxthread"), cpu, r"^Max CPU/Thread Usage", 7, (0, 100)))
+    if gpu:
+        rows.append(_row_if(ix, t("gpu_clock"), gpu, r"^GPU Clock$", 6, (200, 3200)))
+        rows.append(_row_if(ix, t("gpu_load"), gpu, [r"^GPU Core Load", r"^GPU Utili[sz]ation", r"^GPU Load"], 7,
+                            (0, 100)))
+        lp, used = ix.first(gpu, [r"^GPU D3D Memory Dedicated$", r"^GPU Memory Allocated$"], 8)
+        if lp:
+            _, alloc = ix.first(gpu, r"^GPU Memory Allocated$", 8)
+            _, avail = ix.first(gpu, r"^GPU Memory Available$", 8)
+            total = round((alloc["value"] + avail["value"]) / 1024) * 1024 if alloc and avail else 0
+            if total < 1024:
+                total = 8192
+            rows.append(_R(t("vram"), gpu, lp, 8, "MB", (0, total)))
+    sysre = r"^System:"
+    lp, used = ix.first(sysre, r"^Physical Memory Used$", 8)
+    if lp:
+        _, avail = ix.first(sysre, r"^Physical Memory Available$", 8)
+        total = round((used["value"] + (avail["value"] if avail else 0)) / 1024) * 1024
+        rows.append(_R(t("ram"), sysre, lp, 8, "MB", (0, total if total >= 2048 else 16384)))
+    add("sec_clock", "gauge", rows)
+
+    # ---------------- power
+    rows = []
+    if cpus:
+        rows.append(_row_if(ix, t("cpu_pkg_power"), cpu,
+                            [r"^CPU Package Power$", r"^CPU Total Power", r"^Total CPU Power", r"^CPU Package Power",
+                             r"^CPU (?!.*SVI3)(?!PPT)(?!Core)(?!SoC).*Power", r"^CPU PPT$"], 5, (10, 150)))
+        rows.append(_row_if(ix, t("cpu_core_power"), cpu, [r"^CPU Core Power", r"^IA Cores Power"], 5, (5, 120)))
+        rows.append(_row_if(ix, t("cpu_soc_power"), cpu, r"^CPU SoC Power", 5, (5, 30)))
+        rows.append(_row_if(ix, t("cpu_core_volt"), cpu, r"^CPU VDDCR_VDD Voltage", 2, (0.7, 1.5)))
+    if gpu:
+        rows.append(_row_if(ix, t("gpu_power"), gpu, [r"^GPU Power$", r"^GPU (?:ASIC|Chip) Power", r"^GPU Power"],
+                            5, (20, 300)))
+        rows.append(_row_if(ix, t("gpu_volt"), gpu, r"^GPU Core Voltage$", 2, (0.7, 1.2)))
+    # de-duplicate (the same reading must not appear twice)
+    seen_lbl, uniq = set(), []
+    for r in rows:
+        if r and (r["sensor"], r["label"]) not in seen_lbl:
+            seen_lbl.add((r["sensor"], r["label"]))
+            uniq.append(r)
+    add("sec_power", "bolt", uniq)
+
+    # ---------------- temperatures
+    rows = []
+    if cpus:
+        rows.append(_row_if(ix, t("cpu_temp"), cpu,
+                            [r"^CPU \(Tctl/Tdie\)", r"^CPU \(Tdie\)", r"^CPU Package$"], 1, (35, 95)))
+        for r in ix.readings(cpu, r"^CPU CCD(\d+) \(Tdie\)", 1):
+            n = re.search(r"CCD(\d+)", r["label"]).group(1)
+            rows.append(_R(t("cpu_ccd", n=n), cpu, r"^CPU CCD" + n + r" \(Tdie\)", 1, None, (30, 95)))
+        rows.append(_row_if(ix, t("cpu_iod"), cpu, r"^CPU IOD Hotspot", 1, (35, 90)))
+        rows.append(_row_if(ix, t("cpu_core_max"), cpu, r"^Core Max$", 1, (35, 95)))
+    mbs = [s for s in ix.sensors if not _NON_MB.search(s)]
+    for s in mbs:
+        sre = "^" + re.escape(s) + "$"
+        for r in ix.readings(sre, rtype=1):
+            lbl = r["label"]
+            ok = re.search(r"VRM|MOS|PCH|Chipset|^System|Motherboard|Mainboard|Socket|^MB", lbl, re.I) or re.search(r"Chipset", s, re.I)
+            if not ok or not (1 <= r["value"] < 150):
+                continue
+            lim = (30, 105) if re.search(r"VRM|MOS", lbl, re.I) else (30, 90)
+            rows.append(_R(lbl if re.match(r"(?i)motherboard|mainboard", lbl) else t("mb", n=lbl), sre, "^" + re.escape(lbl) + "$", 1, None, lim))
+    if gpu:
+        rows.append(_row_if(ix, t("gpu_temp"), gpu, r"^GPU Temperature", 1, (30, 88)))
+        rows.append(_row_if(ix, t("gpu_hot"), gpu, r"^GPU Hot ?Spot Temperature", 1, (35, 100)))
+        rows.append(_row_if(ix, t("gpu_memtemp"), gpu, [r"^GPU Memory Junction Temperature",
+                                                        r"^GPU Memory Temperature"], 1, (40, 105)))
+    for s in ix.sensors_like(r"^S\.M\.A\.R\.T\.:")[:4]:
+        sre = "^" + re.escape(s) + "$"
+        lp, _ = ix.first(sre, [r"^Drive Temperature$", r"^Drive Temperature"], 1)
+        if lp:
+            model = re.sub(r"^S\.M\.A\.R\.T\.:\s*", "", s)
+            model = re.sub(r"\s*\[[^\]]*\]\s*$", "", model)
+            model = re.sub(r"\s*\([^)]*\)\s*$", "", model) or t("drive")
+            rows.append(_R(model, sre, lp, 1, None, (30, 80)))
+    for s in ix.sensors_like(r"^DDR\d DIMM")[:4]:
+        sre = "^" + re.escape(s) + "$"
+        lp, _ = ix.first(sre, r"^SPD Hub", 1)
+        if lp:
+            m = re.search(r"CHANNEL (\w+)/DIMM (\d+)", s, re.I)
+            n = (m.group(1) + m.group(2)) if m else re.search(r"\[#(\d+)\]", s).group(1) if "[#" in s else "?"
+            rows.append(_R(t("dimm", n=n), sre, lp, 1, None, (30, 85)))
+    add("sec_temp", "temp", rows)
+
+    # ---------------- fans
+    rows = []
+    for s in mbs:
+        sre = "^" + re.escape(s) + "$"
+        for r in ix.readings(sre, rtype=3):
+            if r["value"] > 0:
+                rows.append(_R(r["label"], sre, "^" + re.escape(r["label"]) + "$", 3, "RPM", (0, 3000)))
+    if gpu:
+        r = next(iter(ix.readings(gpu, r"^GPU Fan", 3)), None)
+        if r:      # GPU fans legitimately stop at idle: keep the row
+            rows.append(_R(t("gpu_fan"), gpu, "^" + re.escape(r["label"]) + "$", 3, "RPM", (0, 3300)))
+    add("sec_fan", "fan", rows)
+
+    # ---------------- network / disk
+    rows = []
+    nets = ix.sensors_like(r"^Network:")
+    if nets:
+        good = [s for s in nets if not _VIRTUAL.search(s)] or nets
+
+        def traffic(s):
+            return sum(r["value"] for r in ix.readings("^" + re.escape(s) + "$", r"^Total (DL|UP)")) + \
+                   sum(r["value"] for r in ix.readings("^" + re.escape(s) + "$", r"^Current (DL|UP) rate"))
+        best = max(good, key=lambda s: (traffic(s), -good.index(s)))
+        sre = "^" + re.escape(best) + "$"
+        lp, r = ix.first(sre, r"^Current DL rate", 8)
+        unit = r["unit"] if r else "KB/s"
+        rows.append(_row_if(ix, t("download"), sre, r"^Current DL rate", 8, _scaled(unit, 0, 100000)))
+        rows.append(_row_if(ix, t("upload"), sre, r"^Current UP rate", 8, _scaled(unit, 0, 50000)))
+    drives = ix.sensors_like(r"^Drive:")
+    if drives:
+        d = next((s for s in drives if re.search(r"\[C:\]", s)), drives[0])
+        sre = "^" + re.escape(d) + "$"
+        rows.append(_row_if(ix, t("disk_read"), sre, r"^Read Rate$", 8, (0, 3000)))
+        rows.append(_row_if(ix, t("disk_write"), sre, r"^Write Rate$", 8, (0, 3000)))
+    add("sec_net", "net", rows)
+
+    # ---------------- fps
+    pm = r"^PresentMon"
+    rows = [
+        _row_if(ix, t("fps"), pm, [r"^Framerate Presented \(avg\)", r"^Framerate \(avg\)", r"^Framerate$"], None,
+                (165, 30), "fps"),
+        _row_if(ix, t("fps_1"), pm, [r"^Framerate Presented \(1% low\)", r"^Framerate \(1% low\)"], None,
+                (120, 20), "fps"),
+        _row_if(ix, t("fps_01"), pm, [r"^Framerate Presented \(0\.1% low\)", r"^Framerate \(0\.1% low\)"], None,
+                (90, 15), "fps"),
+    ]
+    add("sec_fps", "fps", rows)
+    return sections

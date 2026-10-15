@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+logs/
+*.csv
+config.json
+hwinfo_interval.txt
+*.log
+sensors.txt
+panel_eski.py
+panel_onceki.py
+*.bak
